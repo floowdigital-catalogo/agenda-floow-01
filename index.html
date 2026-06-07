@@ -357,6 +357,63 @@
   .dl-btn{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--txt-dim);border-radius:7px;padding:5px 12px;font-size:12px;font-weight:700;transition:.13s}
   .dl-btn:hover{border-color:var(--brand);color:var(--brand)}
   .dl-btn.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
+
+  /* grade do dia rolável (mostra as 24h sem esticar a página) */
+  .daygrid-wrap{max-height:72vh;overflow:auto;border-radius:12px;border:1px solid var(--line-soft)}
+  .daygrid-wrap .daygrid{border:none;border-radius:0}
+
+  /* ---------- melhorias de visual / usabilidade no mobile ---------- */
+  @media(max-width:600px){
+    body{padding:14px 11px 64px}
+    header.app{margin-bottom:12px;gap:10px}
+    .brand{gap:10px}
+    .brand .name{font-size:20px}
+    .brand .sub{font-size:10.5px}
+    .mark{width:42px;height:42px}
+    .mark svg{width:25px}
+    .user-chip{padding:4px 5px 4px 11px;gap:7px}
+    .uc-role{display:none}
+    .uc-name{font-size:13px}
+
+    /* abas roláveis na horizontal */
+    .tabs{gap:2px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{padding:9px 11px;font-size:13px;white-space:nowrap;flex:none}
+
+    /* barra de ferramentas do calendário empilha melhor */
+    .toolbar{padding:9px 10px;gap:8px}
+    .nav{flex:1;min-width:0}
+    .period{flex:1;min-width:0;font-size:16px}
+    .seg{flex:1 1 100%}
+    .seg button{flex:1;padding:10px 4px}
+    select.filter{flex:1 1 100%;max-width:none}
+    .toolbar .btn.primary{flex:1 1 100%;justify-content:center;padding:12px}
+    .mine-badge{flex:1 1 100%;text-align:center}
+
+    /* calendário (mês) mais compacto */
+    .grid,.grid-head{gap:4px}
+    .cell{min-height:58px;border-radius:9px;padding:5px;gap:3px}
+    .ev{font-size:10.5px;padding:3px 5px}
+    .ev .ti{display:none}
+    .more{font-size:10px}
+
+    /* semana / lista */
+    .wday{padding:11px 12px;gap:11px}
+    .wday .wd-date{width:48px}
+    .li-time{width:72px;font-size:11.5px}
+
+    /* toques maiores e modais cheios */
+    .btn{padding:10px 13px}
+    .modal{padding:18px;border-radius:14px}
+    .modal-actions{flex-wrap:wrap}
+    .modal-actions .del{order:3;width:100%!important}
+    .typegrid{grid-template-columns:repeat(2,1fr)}
+
+    /* painel */
+    .metric .mv{font-size:25px}
+    .loadrow .ln{width:108px}
+    .daygrid-wrap{max-height:66vh}
+  }
 </style>
 
 <!-- Polyfill de window.storage -> localStorage (mantém a API do ambiente original) -->
@@ -460,7 +517,7 @@
     <div class="two">
       <div>
         <label class="f">Situação</label>
-        <select class="t" id="clHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select>
+        <select class="t" id="clHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select>
       </div>
       <div>
         <label class="f">Status</label>
@@ -505,7 +562,7 @@
     <input class="t" id="aName" placeholder="Ex: Brizzon Jeans" onkeydown="if(event.key==='Enter')saveAdd()">
     <div class="two">
       <div><label class="f">Código <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aCode" placeholder="Ex: 67"></div>
-      <div><label class="f">Situação</label><select class="t" id="aHealth"><option value="excelente">Excelente</option><option value="bom" selected>Bom</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select></div>
+      <div><label class="f">Situação</label><select class="t" id="aHealth"><option value="excelente">Excelente</option><option value="bom" selected>Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select></div>
     </div>
     <div class="two">
       <div><label class="f">Status</label><select class="t" id="aStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select></div>
@@ -546,6 +603,7 @@ const MONTHS=['janeiro','fevereiro','março','abril','maio','junho','julho','ago
 const HEALTH=[
   {id:'excelente',label:'Excelente',color:'#36d399'},
   {id:'bom',label:'Bom',color:'#5B8DEF'},
+  {id:'iniciante',label:'Iniciante',color:'#4DD0E1'},
   {id:'observacao',label:'Observação',color:'#f5b400'},
   {id:'ruim',label:'Ruim',color:'#f2675c'},
 ];
@@ -690,6 +748,13 @@ function clientNext(id){
 function render(){
   if(!currentUser){renderLogin();return;}
   renderUserChip();
+  if(!notifyReady){
+    notifyReady=true;
+    if('Notification' in window){
+      if(Notification.permission==='granted')setupNotifications();
+      else if(Notification.permission==='default')Notification.requestPermission().then(p=>{renderUserChip();if(p==='granted')setupNotifications();}).catch(()=>{});
+    }
+  }
   const app=$('#app');app.innerHTML='';
   const nav=document.createElement('div');nav.className='tabs';
   if(isAdmin()){
@@ -737,10 +802,14 @@ function renderLogin(){
   setTimeout(()=>$('#liEmail')&&$('#liEmail').focus(),40);
 }
 function renderUserChip(){
+  const hasNotif=('Notification' in window);
+  const notifOn=hasNotif&&Notification.permission==='granted';
+  const notifBtn=hasNotif?`<button class="uc-btn" onclick="requestNotifyPermission()" title="${notifOn?'Avisos de tarefas ativados':'Ativar avisos de tarefas (20 min antes)'}">${notifOn?'🔔':'🔕'}</button>`:'';
   $('#userChip').innerHTML=`
     <span class="uc-dot" style="background:${currentUser.color||'#888'}"></span>
     <span class="uc-name">${esc(currentUser.name)}</span>
     <span class="uc-role">${isAdmin()?'Admin':'Equipe'}</span>
+    ${notifBtn}
     <button class="uc-btn" onclick="logout()" title="Sair">Sair</button>`;
 }
 function setTab(t){tab=t;render();}
@@ -918,7 +987,7 @@ function renderWeek(app){
 }
 
 /* ---------- DAY view (Google-Calendar-style timeline) ---------- */
-const DAY_START=7, DAY_END=22, HOURPX=56;
+const DAY_START=0, DAY_END=24, HOURPX=56;
 function renderDay(app){
   const d=cursor;const evs=eventsOn(d);
   const load=dayLoad(d);
@@ -942,12 +1011,12 @@ function renderDay(app){
   grid.style.height=((DAY_END-DAY_START)*HOURPX)+'px';
   let hours='';
   for(let h=DAY_START;h<=DAY_END;h++){
-    hours+=`<div class="hrow" style="top:${(h-DAY_START)*HOURPX}px"><span class="hlbl">${pad(h)}:00</span></div>`;
+    hours+=`<div class="hrow" style="top:${(h-DAY_START)*HOURPX}px">${h<24?`<span class="hlbl">${pad(h)}:00</span>`:''}</div>`;
   }
   grid.innerHTML=hours;
   grid.onclick=e=>{
     if(!e.target.classList.contains('daygrid')&&!e.target.classList.contains('hrow'))return;
-    const y=e.offsetY;const h=DAY_START+Math.floor(y/HOURPX);
+    const y=e.offsetY;const h=Math.min(23,DAY_START+Math.floor(y/HOURPX));
     openEv(null,iso(d));setTimeout(()=>{$('#fTime').value=`${pad(h)}:00`;autoEnd();},30);
   };
   timed.forEach(x=>{
@@ -972,7 +1041,10 @@ function renderDay(app){
       line.style.top=((nm-DAY_START*60)/60*HOURPX)+'px';grid.appendChild(line);
     }
   }
-  app.appendChild(grid);
+  const dgWrap=document.createElement('div');dgWrap.className='daygrid-wrap';dgWrap.appendChild(grid);app.appendChild(dgWrap);
+  // abre a grade já na hora atual (ou ~07h em outros dias), já que mostramos 24h
+  const scrollTo=today?Math.max(0,(new Date().getHours()-1)*HOURPX):7*HOURPX;
+  setTimeout(()=>{dgWrap.scrollTop=scrollTo;},0);
 }
 function capacityBar(mins){
   const max=8*60;const pct=Math.min(100,Math.round(mins/max*100));
@@ -1048,7 +1120,7 @@ function renderClients(app){
   bar.innerHTML=`
     <input class="search" id="cSearch" placeholder="🔍 Buscar cliente…" value="${esc(clientSearch)}" oninput="clientSearch=this.value;renderClientGrid()">
     <select class="filter" id="cHealthF" onchange="clientHealthFilter=this.value;renderClientGrid()">
-      <option value="all">Toda situação</option><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="observacao">Observação</option><option value="ruim">Ruim</option>
+      <option value="all">Toda situação</option><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option>
     </select>
     <select class="filter" id="cStatusF" onchange="clientStatusFilter=this.value;renderClientGrid()">
       <option value="all">Todos (${state.clients.length})</option><option value="ativo">Ativos</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados</option>
@@ -1354,6 +1426,48 @@ function renderCopy(){$('#copyBox').textContent=buildCopyText();}
 function doCopy(){const txt=buildCopyText();const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copiado! Cole no WhatsApp 📋');}catch(e){toast('Selecione e copie');}document.body.removeChild(ta);}
 
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
+
+/* ---------- notificações: avisar 20 min antes de cada tarefa ---------- */
+const NOTIFY_LEAD=20; // minutos de antecedência
+let notifyTimer=null, notifyReady=false;
+function notifyKey(ev){return 'floow-notified:'+ev.date+':'+ev.id;}
+function cleanNotifyKeys(){
+  try{const today=iso(new Date());for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.indexOf('floow-notified:')===0&&k.indexOf('floow-notified:'+today+':')!==0)localStorage.removeItem(k);}}catch(e){}
+}
+function setupNotifications(){
+  if(!('Notification' in window))return;
+  cleanNotifyKeys();
+  if(notifyTimer)clearInterval(notifyTimer);
+  checkUpcomingNotifications();
+  notifyTimer=setInterval(checkUpcomingNotifications,30000); // checa a cada 30s
+}
+function requestNotifyPermission(){
+  if(!('Notification' in window)){toast('Este navegador não suporta avisos');return;}
+  if(Notification.permission==='granted'){toast('🔔 Avisos já ativados');setupNotifications();return;}
+  Notification.requestPermission().then(p=>{
+    renderUserChip();
+    if(p==='granted'){toast('🔔 Avisos ativados');setupNotifications();}
+    else toast('Avisos bloqueados — libere nas permissões do site');
+  }).catch(()=>{});
+}
+function checkUpcomingNotifications(){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  if(!currentUser||!state||!state.events)return;
+  const now=new Date();const todayIso=iso(now);const nowMin=now.getHours()*60+now.getMinutes();
+  state.events.forEach(ev=>{
+    if(ev.done||ev.resp!==currentUser.id||ev.date!==todayIso)return;
+    const s=toMin(ev.time);if(s==null)return;
+    const diff=s-nowMin;
+    if(diff>=0&&diff<=NOTIFY_LEAD){
+      const key=notifyKey(ev);if(localStorage.getItem(key))return;
+      localStorage.setItem(key,'1');
+      try{new Notification('⏰ Tarefa em '+(diff<=1?'instantes':diff+' min'),{
+        body:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`+(fmtRange(ev)?'\n'+fmtRange(ev):''),
+        icon:'/icon.svg',tag:ev.id
+      });}catch(e){}
+    }
+  });
+}
 
 let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200);}
 document.querySelectorAll('.scrim').forEach(s=>s.addEventListener('click',e=>{if(e.target===s)s.classList.remove('on');}));

@@ -463,6 +463,7 @@
   })();
 </script>
 <script type="module" src="/src/main.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -624,7 +625,7 @@ function deliverDone(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]
 function applyDeliveryLink(ev){
   if(!ev||!ev.done)return;
   const t=TYPES_().find(x=>x.id===ev.type);if(!t||!t.link)return;
-  const c=clientById(ev.clientId);if(!c)return;ensureChecklist(c);c.checklist[t.link]=true;
+  const c=clientById(ev.clientId);if(!c)return;ensureChecklist(c);c.checklist[t.link]=true;touch(c);
 }
 const MONTHS_S=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
@@ -642,6 +643,7 @@ let openClientId=null, clientDraftStatus='ativo', clientDraftOwner=null;
 
 const $=s=>document.querySelector(s);
 const uid=()=>Math.random().toString(36).slice(2,9);
+const touch=o=>{if(o)o.updatedAt=Date.now();return o;}; // marca "editado agora" (p/ mesclagem multiusuário)
 const pad=n=>String(n).padStart(2,'0');
 const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseISO=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);};
@@ -658,6 +660,8 @@ function clientName(id){const c=clientById(id);return c?c.name:'(sem cliente)';}
 const toMin=t=>{if(!t)return null;const[h,m]=t.split(':').map(Number);return h*60+m;};
 const fmtDur=min=>{if(min<=0)return'';const h=Math.floor(min/60),m=min%60;return h?(m?`${h}h${pad(m)}`:`${h}h`):`${m}min`;};
 const fmtRange=ev=>ev.time?(ev.end?`${ev.time}–${ev.end}`:ev.time):'';
+const addMinHHMM=(t,min)=>{const m=toMin(t)+min;return `${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;};
+const nextDay=isoStr=>{const d=parseISO(isoStr);d.setDate(d.getDate()+1);return iso(d);};
 function dayLoad(d){
   const evs=eventsOn(d);let mins=0,timed=0,untimed=0;
   evs.forEach(e=>{const s=toMin(e.time),en=toMin(e.end);if(s!=null&&en!=null&&en>s){mins+=en-s;timed++;}else if(s!=null){timed++;}else untimed++;});
@@ -672,14 +676,69 @@ async function load(){
   if(!state.users)state.users=[];
   if(!state.types)state.types=JSON.parse(JSON.stringify(DEF_TYPES));
   if(!state.checklist)state.checklist=JSON.parse(JSON.stringify(DEF_CHECKLIST));
+  if(!state.tombstones)state.tombstones={events:{},clients:{}};
+  if(!state.tombstones.events)state.tombstones.events={};
+  if(!state.tombstones.clients)state.tombstones.clients={};
   let sid=null;
   try{const r=await window.storage.get(SESSION_KEY,false);if(r&&r.value)sid=JSON.parse(r.value);}catch(e){}
   currentUser=sid?state.users.find(u=>u.id===sid)||null:null;
 }
-async function saveData(){
-  try{await window.storage.set(STORE_KEY,JSON.stringify(state),true);}
-  catch(e){console.error(e);toast('Erro ao salvar');}
+/* mescla duas listas (eventos/clientes) por id, mantendo a versão mais recente
+   e respeitando exclusões (tombstones). Evita que um cliente apague o que o
+   outro criou ao salvar por cima. */
+function mergeArrById(remoteArr,localArr,tomb){
+  const map={};
+  (remoteArr||[]).forEach(x=>{if(x&&x.id)map[x.id]=x;});
+  (localArr||[]).forEach(x=>{
+    if(!x||!x.id)return;
+    const ex=map[x.id];
+    if(!ex)map[x.id]=x;
+    else map[x.id]=((x.updatedAt||0)>=(ex.updatedAt||0))?x:ex;
+  });
+  return Object.values(map).filter(x=>{
+    const t=tomb[x.id];
+    return !(t&&t>=(x.updatedAt||0)); // removido depois da última edição
+  });
 }
+function mergeTomb(a,b){
+  const out={...(a||{})};
+  Object.entries(b||{}).forEach(([id,ts])=>{if(!out[id]||ts>out[id])out[id]=ts;});
+  return out;
+}
+function mergeStates(remote,local){
+  if(!remote)return local;
+  if(!local)return remote;
+  const rt=remote.tombstones||{}, lt=local.tombstones||{};
+  const tomb={events:mergeTomb(rt.events,lt.events),clients:mergeTomb(rt.clients,lt.clients)};
+  return {
+    ...remote, ...local, // users/types/checklist = versão de quem está salvando (alterações deliberadas)
+    events:mergeArrById(remote.events,local.events,tomb.events),
+    clients:mergeArrById(remote.clients,local.clients,tomb.clients),
+    tombstones:tomb,
+    version:9
+  };
+}
+let saveChain=Promise.resolve();
+async function saveData(){
+  // serializa as gravações e mescla com o remoto antes de escrever
+  saveChain=saveChain.then(async()=>{
+    try{
+      let remote=null;
+      try{const r=await window.storage.get(STORE_KEY,true);if(r&&r.value)remote=JSON.parse(r.value);}catch(e){}
+      if(remote)state=mergeStates(remote,state);
+      await window.storage.set(STORE_KEY,JSON.stringify(state),true);
+    }catch(e){console.error(e);toast('Erro ao salvar');}
+  });
+  return saveChain;
+}
+// recarrega/mescla a agenda quando a aba volta ao foco (vê mudanças da equipe sem F5)
+async function refreshFromCloud(){
+  if(!currentUser||!state)return;
+  if(document.querySelector('.scrim.on'))return; // não interromper edição em modal
+  try{const r=await window.storage.get(STORE_KEY,true);if(r&&r.value){const remote=JSON.parse(r.value);state=mergeStates(remote,state);render();}}catch(e){}
+}
+window.addEventListener('focus',refreshFromCloud);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshFromCloud();});
 async function saveSession(){try{await window.storage.set(SESSION_KEY,JSON.stringify(currentUser?currentUser.id:null),false);}catch(e){}}
 function doLogin(){
   const email=$('#liEmail').value.trim().toLowerCase();const pass=$('#liPass').value;
@@ -717,7 +776,8 @@ function seed(){
     {id:uid(),clientId:'c43',title:'Acompanhamento comercial',type:'comercial',date:'2026-06-05',time:'10:00',end:'10:45',resp:'u_edu',done:false},
     {id:uid(),clientId:'c44',title:'Captação de criativos',type:'captacao',date:'2026-06-04',time:'15:00',end:'17:00',resp:'u_yur',done:false},
   ];
-  state={version:9,clients,events,users,types:JSON.parse(JSON.stringify(DEF_TYPES)),checklist:JSON.parse(JSON.stringify(DEF_CHECKLIST))};
+  const t=Date.now();clients.forEach(c=>c.updatedAt=t);events.forEach(e=>e.updatedAt=t);
+  state={version:9,clients,events,users,types:JSON.parse(JSON.stringify(DEF_TYPES)),checklist:JSON.parse(JSON.stringify(DEF_CHECKLIST)),tombstones:{events:{},clients:{}}};
 }
 
 /* ---------- helpers ---------- */
@@ -734,7 +794,7 @@ function pmId(){const a=adminUsers()[0];return a?a.id:(state.users[0]&&state.use
 function findOrCreateClient(raw){
   const p=parseClientLine(raw);if(!p||!p.name)return null;
   let c=state.clients.find(x=>x.name.toLowerCase()===p.name.toLowerCase());
-  if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist()};state.clients.push(c);}
+  if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()};state.clients.push(c);}
   return c.id;
 }
 function clientPending(id){return state.events.filter(e=>e.clientId===id&&!e.done).length;}
@@ -805,11 +865,12 @@ function renderUserChip(){
   const hasNotif=('Notification' in window);
   const notifOn=hasNotif&&Notification.permission==='granted';
   const notifBtn=hasNotif?`<button class="uc-btn" onclick="requestNotifyPermission()" title="${notifOn?'Avisos de tarefas ativados':'Ativar avisos de tarefas (20 min antes)'}">${notifOn?'🔔':'🔕'}</button>`:'';
+  const gBtn=(isAdmin()&&googleClientId())?`<button class="uc-btn" onclick="connectGoogle()" title="${gConnectedFlag()?'Google Agenda conectado (reconectar)':'Conectar Google Agenda'}">${gConnectedFlag()?'📅✓':'📅'}</button>`:'';
   $('#userChip').innerHTML=`
     <span class="uc-dot" style="background:${currentUser.color||'#888'}"></span>
     <span class="uc-name">${esc(currentUser.name)}</span>
     <span class="uc-role">${isAdmin()?'Admin':'Equipe'}</span>
-    ${notifBtn}
+    ${gBtn}${notifBtn}
     <button class="uc-btn" onclick="logout()" title="Sair">Sair</button>`;
 }
 function setTab(t){tab=t;render();}
@@ -914,7 +975,7 @@ function renderDeliverGrid(){
   }).join('');
   wrap.innerHTML='';wrap.appendChild(grid);
 }
-function toggleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=!c.checklist[iid];saveData();renderDeliverGrid();}
+function toggleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=!c.checklist[iid];touch(c);saveData();renderDeliverGrid();}
 
 /* ---------- calendar tab ---------- */
 function renderCal(app){
@@ -1178,7 +1239,7 @@ function saveAdd(){
   const name=$('#aName').value.trim();if(!name){toast('Digite o nome');return;}
   const ex=state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase());
   if(ex){toast('Cliente já existe');closeAdd();openClient(ex.id);return;}
-  const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:$('#aHealth').value,owner:$('#aOwner').value,checklist:newChecklist()};
+  const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:$('#aHealth').value,owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
   state.clients.push(c);saveData();closeAdd();render();openClient(c.id);toast('Cliente cadastrado ✓');
 }
 /* bulk import modal */
@@ -1196,7 +1257,7 @@ function doBulk(){
   if(!lines.length){toast('Nada para importar');return;}
   const names=new Set(state.clients.map(c=>c.name.toLowerCase()));let added=0;
   lines.forEach(l=>{const key=l.name.toLowerCase();if(names.has(key))return;
-    state.clients.push({id:uid(),code:l.code,name:l.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist()});
+    state.clients.push({id:uid(),code:l.code,name:l.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()});
     names.add(key);added++;});
   saveData();closeBulk();render();toast(`${added} cliente(s) importado(s) ✓`);
 }
@@ -1227,7 +1288,7 @@ function renderTimeline(){
 function addTaskForClient(){const c=clientById(openClientId);closeClient();openEv(null,null,c?c.name:'');}
 function saveClient(){
   const c=clientById(openClientId);if(!c)return;
-  c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;
+  c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;touch(c);
   saveData();closeClient();render();toast('Cliente atualizado');
 }
 let delArmed=false, delTimer=null;
@@ -1242,6 +1303,11 @@ function deleteClient(btn){
     return;
   }
   clearTimeout(delTimer);delArmed=false;
+  const now=Date.now();
+  if(state.tombstones){
+    state.tombstones.clients[openClientId]=now;
+    state.events.filter(e=>e.clientId===openClientId).forEach(e=>state.tombstones.events[e.id]=now);
+  }
   state.events=state.events.filter(e=>e.clientId!==openClientId);
   state.clients=state.clients.filter(x=>x.id!==openClientId);
   saveData();closeClient();render();toast('Cliente excluído');
@@ -1294,7 +1360,7 @@ function updateDurHint(){
 $('#fEnd')&&document.addEventListener('input',e=>{if(e.target.id==='fEnd')updateDurHint();});
 function saveEv(){
   if(!isAdmin()){ // função só altera o "concluído" da própria demanda
-    if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&e.resp===myMember()){e.done=draftDone;applyDeliveryLink(e);}}
+    if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&e.resp===myMember()){e.done=draftDone;touch(e);applyDeliveryLink(e);}}
     saveData();closeEv();render();toast(draftDone?'Concluído — entrega marcada':'Status atualizado');return;
   }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
@@ -1303,10 +1369,11 @@ function saveEv(){
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}
+  touch(ref);
   applyDeliveryLink(ref);
-  saveData();closeEv();render();toast(editingId?'Entrega atualizada':'Entrega criada');
+  saveData();syncEventToGoogle(ref);closeEv();render();toast(editingId?'Entrega atualizada':'Entrega criada');
 }
-function deleteEv(){if(!editingId||!isAdmin())return;state.events=state.events.filter(e=>e.id!==editingId);saveData();closeEv();render();toast('Entrega excluída');}
+function deleteEv(){if(!editingId||!isAdmin())return;const ev=state.events.find(e=>e.id===editingId);deleteGoogleEvent(ev);if(state.tombstones)state.tombstones.events[editingId]=Date.now();state.events=state.events.filter(e=>e.id!==editingId);saveData();closeEv();render();toast('Entrega excluída');}
 
 /* ---------- config tab (admin): usuários + demandas ---------- */
 let cfgDraft=null, typesDraft=null, checkDraft=null;
@@ -1320,6 +1387,9 @@ function renderConfig(app){
     <div id="cfgList"></div>
     <button class="btn ghost cfg-add" onclick="addCfgUser()">+ Adicionar usuário</button>
 
+    ${googleClientId()?`<div class="cfg-sec-h">📅 Google Agenda <span class="cfg-side">conecte seu Google e marque "📅 Google" nos usuários cujas entregas devem ir para o Google Agenda</span></div>
+    <div class="cfg-card" id="gcalCfg"></div>`:''}
+
     <div class="cfg-sec-h">🗂️ Demandas <span class="cfg-side">o que aparece ao criar uma entrega · vincule a uma entrega para marcar automático</span></div>
     <div id="typesList"></div>
     <button class="btn ghost cfg-add" onclick="addType()">+ Adicionar demanda</button>
@@ -1330,7 +1400,7 @@ function renderConfig(app){
 
     <div class="empty-hint" style="margin-top:12px">⚠️ As senhas ficam guardadas no painel sem criptografia — controle interno de equipe.</div>
     <div class="modal-actions" style="max-width:320px"><button class="btn primary" style="flex:1;justify-content:center" onclick="saveConfig()">Salvar tudo</button></div>`);
-  renderCfgList();renderTypesList();renderCheckList();
+  renderCfgList();renderTypesList();renderCheckList();renderGcalConfig();
 }
 const DEMAND_OPTS=()=>typesDraft.filter(t=>t.id!=='outro');
 function renderCfgList(){
@@ -1341,6 +1411,7 @@ function renderCfgList(){
         <input type="color" class="tcolor" value="${u.color||'#888888'}" oninput="cfgDraft[${i}].color=this.value">
         <input class="t uname" value="${esc(u.name)}" placeholder="Nome" oninput="cfgDraft[${i}].name=this.value">
         <label class="uadmin"><input type="checkbox" ${u.isAdmin?'checked':''} onchange="cfgDraft[${i}].isAdmin=this.checked;renderCfgList()"> Admin</label>
+        ${googleClientId()?`<label class="uadmin" title="Criar as entregas desta pessoa no Google Agenda"><input type="checkbox" ${u.googleSync?'checked':''} onchange="cfgDraft[${i}].googleSync=this.checked"> 📅 Google</label>`:''}
         <button class="rm" onclick="cfgDraft.splice(${i},1);renderCfgList()">×</button>
       </div>
       <div class="cfg-grid2">
@@ -1389,7 +1460,7 @@ function saveConfig(){
   if(!types.length){toast('Mantenha ao menos 1 demanda');return;}
   const check=checkDraft.filter(c=>c.label.trim());
   const validLinks=new Set(check.map(c=>c.id));
-  state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
+  state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
   state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
   state.clients.forEach(ensureChecklist);
@@ -1427,12 +1498,106 @@ function doCopy(){const txt=buildCopyText();const ta=document.createElement('tex
 
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
 
+/* ---------- integração com o Google Agenda ---------- */
+const GCAL_SCOPE='https://www.googleapis.com/auth/calendar.events';
+const GCAL_TZ='America/Sao_Paulo';
+let gAccessToken=null, gTokenClient=null, gTokenExpiry=0, gPendingAfterAuth=null;
+function googleClientId(){return window.GOOGLE_CLIENT_ID||'';}
+function googleLibReady(){return typeof google!=='undefined'&&google.accounts&&google.accounts.oauth2;}
+function gConnectedFlag(){return localStorage.getItem('floow-gcal-connected')==='1';}
+function gInitTokenClient(){
+  if(gTokenClient||!googleLibReady()||!googleClientId())return gTokenClient;
+  gTokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:googleClientId(),
+    scope:GCAL_SCOPE,
+    callback:resp=>{
+      if(resp&&resp.access_token){
+        gAccessToken=resp.access_token;
+        gTokenExpiry=Date.now()+((resp.expires_in?resp.expires_in*1000:3300000)-60000);
+        localStorage.setItem('floow-gcal-connected','1');
+        renderUserChip();const g=$('#gcalCfg');if(g)renderGcalConfig();
+        if(gPendingAfterAuth){const f=gPendingAfterAuth;gPendingAfterAuth=null;f();}
+        else toast('📅 Google Agenda conectado');
+      }
+    }
+  });
+  return gTokenClient;
+}
+function connectGoogle(){
+  if(!googleClientId()){toast('⚠️ Falta configurar o Google (client ID). Veja GOOGLE.md');return;}
+  if(!googleLibReady()){toast('Carregando o Google… tente de novo em alguns segundos');return;}
+  gInitTokenClient();
+  gTokenClient.requestAccessToken({prompt:gConnectedFlag()?'':'consent'});
+}
+function gEnsureToken(cb){
+  if(gAccessToken&&Date.now()<gTokenExpiry){cb();return;}
+  if(!googleClientId()||!googleLibReady())return;
+  gInitTokenClient();gPendingAfterAuth=cb;
+  gTokenClient.requestAccessToken({prompt:''});
+}
+function shouldSyncGoogle(ev){
+  if(!ev||!gConnectedFlag())return false;
+  const u=userById(ev.resp);
+  return !!(u&&u.googleSync);
+}
+function gcalPayload(ev){
+  const body={
+    summary:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`,
+    description:`Agenda FLOOW Digital\nResponsável: ${respName(ev.resp)}`
+  };
+  if(ev.time){
+    const end=ev.end||addMinHHMM(ev.time,60);
+    body.start={dateTime:`${ev.date}T${ev.time}:00`,timeZone:GCAL_TZ};
+    body.end={dateTime:`${ev.date}T${end}:00`,timeZone:GCAL_TZ};
+  }else{
+    body.start={date:ev.date};body.end={date:nextDay(ev.date)};
+  }
+  const u=userById(ev.resp);
+  if(u&&u.email&&/@/.test(u.email))body.attendees=[{email:u.email}];
+  return body;
+}
+function syncEventToGoogle(ev){
+  if(!shouldSyncGoogle(ev))return;
+  gEnsureToken(()=>{
+    const isUpdate=!!ev.gcalId;
+    const base='https://www.googleapis.com/calendar/v3/calendars/primary/events';
+    const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'')+'?sendUpdates=all';
+    fetch(url,{method:isUpdate?'PATCH':'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(gcalPayload(ev))})
+      .then(r=>r.json()).then(data=>{
+        if(data&&data.error){console.warn('gcal',data.error);toast('Falha ao criar no Google');return;}
+        if(data&&data.id&&!ev.gcalId){ev.gcalId=data.id;saveData();}
+        toast('📅 Criado no Google Agenda do '+respName(ev.resp));
+      }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar no Google');});
+  });
+}
+function deleteGoogleEvent(ev){
+  if(!ev||!ev.gcalId||!gConnectedFlag())return;
+  gEnsureToken(()=>{
+    fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+encodeURIComponent(ev.gcalId)+'?sendUpdates=all',{method:'DELETE',headers:{'Authorization':'Bearer '+gAccessToken}}).catch(()=>{});
+  });
+}
+function renderGcalConfig(){
+  const wrap=$('#gcalCfg');if(!wrap)return;
+  const idSet=!!googleClientId();const conn=gConnectedFlag();
+  wrap.innerHTML=`
+    <div class="cfg-row" style="flex-wrap:wrap;gap:10px">
+      <div style="flex:1;min-width:170px">
+        <div style="font-weight:700">${conn?'✅ Google conectado':'Google não conectado'}</div>
+        <div class="empty-hint" style="margin:4px 0 0">${idSet?'As entregas dos usuários marcados com 📅 viram evento no Google e o responsável é convidado pelo e-mail.':'⚠️ Falta a credencial do Google (VITE_GOOGLE_CLIENT_ID na Vercel). Veja o guia GOOGLE.md.'}</div>
+      </div>
+      <button class="btn ${conn?'':'primary'}" onclick="connectGoogle()">${conn?'Reconectar Google':'Conectar Google'}</button>
+    </div>`;
+}
+
 /* ---------- notificações: avisar 20 min antes de cada tarefa ---------- */
 const NOTIFY_LEAD=20; // minutos de antecedência
 let notifyTimer=null, notifyReady=false;
 function notifyKey(ev){return 'floow-notified:'+ev.date+':'+ev.id;}
 function cleanNotifyKeys(){
-  try{const today=iso(new Date());for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.indexOf('floow-notified:')===0&&k.indexOf('floow-notified:'+today+':')!==0)localStorage.removeItem(k);}}catch(e){}
+  try{const today=iso(new Date());for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(!k)continue;
+    const isNotif=k.indexOf('floow-notified:')===0||k.indexOf('floow-started:')===0;
+    if(isNotif&&k.indexOf(':'+today+':')===-1)localStorage.removeItem(k);
+  }}catch(e){}
 }
 function setupNotifications(){
   if(!('Notification' in window))return;
@@ -1450,6 +1615,12 @@ function requestNotifyPermission(){
     else toast('Avisos bloqueados — libere nas permissões do site');
   }).catch(()=>{});
 }
+function fireNotif(title,ev,tagSuffix){
+  try{new Notification(title,{
+    body:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`+(fmtRange(ev)?'\n'+fmtRange(ev):''),
+    icon:'/icon.svg',tag:ev.id+(tagSuffix||'')
+  });}catch(e){}
+}
 function checkUpcomingNotifications(){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
   if(!currentUser||!state||!state.events)return;
@@ -1458,13 +1629,15 @@ function checkUpcomingNotifications(){
     if(ev.done||ev.resp!==currentUser.id||ev.date!==todayIso)return;
     const s=toMin(ev.time);if(s==null)return;
     const diff=s-nowMin;
-    if(diff>=0&&diff<=NOTIFY_LEAD){
-      const key=notifyKey(ev);if(localStorage.getItem(key))return;
-      localStorage.setItem(key,'1');
-      try{new Notification('⏰ Tarefa em '+(diff<=1?'instantes':diff+' min'),{
-        body:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`+(fmtRange(ev)?'\n'+fmtRange(ev):''),
-        icon:'/icon.svg',tag:ev.id
-      });}catch(e){}
+    // 1) aviso de antecedência: de 20 min até 1 min antes
+    if(diff>=1&&diff<=NOTIFY_LEAD){
+      const key='floow-notified:'+ev.date+':'+ev.id;
+      if(!localStorage.getItem(key)){localStorage.setItem(key,'1');fireNotif('⏰ Tarefa em '+diff+' min',ev,'-pre');}
+    }
+    // 2) aviso na hora de iniciar: do horário até 2 min depois (tolerância)
+    if(diff<=0&&diff>=-2){
+      const key='floow-started:'+ev.date+':'+ev.id;
+      if(!localStorage.getItem(key)){localStorage.setItem(key,'1');fireNotif('▶️ Hora de começar',ev,'-start');}
     }
   });
 }

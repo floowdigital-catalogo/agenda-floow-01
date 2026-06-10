@@ -500,6 +500,10 @@
       <div><label class="f">Fim</label><input class="t" id="fEnd" type="time"></div>
     </div>
     <div class="empty-hint" id="durHint" style="margin-top:4px"></div>
+    <div id="fLocWrap" style="display:none">
+      <label class="f">📍 Localização</label>
+      <input class="t" id="fLoc" placeholder="Ex: estúdio, loja do cliente, endereço…">
+    </div>
     <label class="f">Responsável</label>
     <div class="respgrid" id="fResps"></div>
     <div class="donetoggle" id="fDone" onclick="toggleDone()"><span class="box" id="fDoneBox"></span> Marcar como concluído</div>
@@ -632,7 +636,7 @@ const MONTHS_S=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov
 let state=null;
 let currentUser=null;
 let tab='cal';            // 'cal' | 'clients'
-let view='month';
+let view='day';
 let cursor=new Date();
 let editingId=null, draftType='outro', draftResp=null, draftDone=false;
 let fClient='', fResp='';            // calendar filters
@@ -655,6 +659,8 @@ function respName(id){const u=userById(id);return u?u.name:'—';}
 function respForDemand(typeId){return (state.users||[]).filter(u=>u.demands&&u.demands.includes(typeId));}
 function adminUsers(){return (state.users||[]).filter(u=>u.isAdmin);}
 function typeOf(id){return TYPES_().find(t=>t.id===id)||{id,em:'📌',label:'—',link:null};}
+function typeWantsLoc(typeId){const t=typeOf(typeId);return !!(t&&(t.id==='captacao'||/capta/i.test(t.label||'')));}
+function updateLocField(){const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';}
 function clientById(id){return state.clients.find(c=>c.id===id);}
 function clientName(id){const c=clientById(id);return c?c.name:'(sem cliente)';}
 const toMin=t=>{if(!t)return null;const[h,m]=t.split(':').map(Number);return h*60+m;};
@@ -873,7 +879,7 @@ function renderUserChip(){
     ${gBtn}${notifBtn}
     <button class="uc-btn" onclick="logout()" title="Sair">Sair</button>`;
 }
-function setTab(t){tab=t;render();}
+function setTab(t){if(t==='cal'&&tab!=='cal')view='day';tab=t;render();}
 
 /* ---------- dashboard (admin) ---------- */
 function renderDash(app){
@@ -1092,7 +1098,7 @@ function renderDay(app){
     blk.className='dblk'+(x.done?' done':'');
     blk.style.cssText=`--c:${c};top:${top}px;height:${height}px;left:${left};width:${w}`;
     blk.onclick=ev=>{ev.stopPropagation();openEv(x.id);};
-    blk.innerHTML=`<div class="db-t">${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}</div><div class="db-r">${esc(respName(x.resp))}</div>`;
+    blk.innerHTML=`<div class="db-t">${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}${x.loc?' · 📍'+esc(x.loc):''}</div><div class="db-r">${esc(respName(x.resp))}</div>`;
     grid.appendChild(blk);
   });
   if(today){
@@ -1325,12 +1331,13 @@ function openEv(id,presetDate,presetClient){
   $('#fDate').value=ev?ev.date:(presetDate||iso(new Date()));
   $('#fTime').value=ev?ev.time:'';
   $('#fEnd').value=ev?(ev.end||''):'';
+  $('#fLoc').value=ev?(ev.loc||''):'';
   draftType=ev?ev.type:(state.types[0]&&state.types[0].id);
   const dl=respForDemand(draftType);
   draftResp=ev?ev.resp:(dl[0]?dl[0].id:(state.users[0]&&state.users[0].id));
   draftDone=ev?!!ev.done:false;
-  renderTypeBtns();renderRespBtns();renderDoneToggle();updateDurHint();
-  ['fClient','fDate','fTime','fEnd'].forEach(idf=>$('#'+idf).disabled=ro);
+  renderTypeBtns();renderRespBtns();renderDoneToggle();updateDurHint();updateLocField();
+  ['fClient','fDate','fTime','fEnd','fLoc'].forEach(idf=>$('#'+idf).disabled=ro);
   $('#fTypes').style.pointerEvents=ro?'none':'';$('#fTypes').style.opacity=ro?'.6':'';
   $('#fResps').style.pointerEvents=ro?'none':'';$('#fResps').style.opacity=ro?'.6':'';
   $('#evDel').style.display=(id&&isAdmin())?'block':'none';
@@ -1338,7 +1345,7 @@ function openEv(id,presetDate,presetClient){
   $('#evScrim').classList.add('on');
 }
 function closeEv(){$('#evScrim').classList.remove('on');editingId=null;}
-function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;renderTypeBtns();renderRespBtns();}
+function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;renderTypeBtns();renderRespBtns();updateLocField();}
 function renderTypeBtns(){$('#fTypes').innerHTML=TYPES_().map(t=>`<button class="typebtn${t.id===draftType?' on':''}" onclick="pickDemand('${t.id}')"><span class="em">${t.em}</span>${t.label}</button>`).join('');}
 function renderRespBtns(){
   const assigned=respForDemand(draftType);
@@ -1365,7 +1372,7 @@ function saveEv(){
   }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
   const title=typeOf(draftType).label;
-  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,resp:draftResp,done:draftDone};
+  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',resp:draftResp,done:draftDone};
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}

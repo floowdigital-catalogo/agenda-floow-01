@@ -357,6 +357,9 @@
   .dl-btn{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--txt-dim);border-radius:7px;padding:5px 12px;font-size:12px;font-weight:700;transition:.13s}
   .dl-btn:hover{border-color:var(--brand);color:var(--brand)}
   .dl-btn.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
+  .dl-actions{display:flex;gap:6px;flex:none}
+  .dl-item.na .dl-label{opacity:.5;text-decoration:line-through}
+  .dl-btn.na-on{background:var(--surface-2);border-color:var(--txt-faint);color:var(--txt-dim)}
 
   /* grade do dia rolável (mostra as 24h sem esticar a página) */
   .daygrid-wrap{max-height:72vh;overflow:auto;border-radius:12px;border:1px solid var(--line-soft)}
@@ -531,6 +534,11 @@
     </div>
     <label class="f">Gestor de Projetos</label>
     <select class="t" id="clOwner"></select>
+    <label class="f">📁 Pasta no Google Drive <span style="text-transform:none;color:var(--txt-faint)">(link)</span></label>
+    <div style="display:flex;gap:8px">
+      <input class="t" id="clDrive" placeholder="Cole o link da pasta do Drive…">
+      <button class="btn" onclick="openClientDrive()" title="Abrir pasta">Abrir</button>
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 4px">
       <label class="f" style="margin:0">Linha do tempo</label>
       <div style="display:flex;gap:8px">
@@ -625,7 +633,10 @@ const DEF_CHECKLIST=[
 const CHECK_=()=>(state&&state.checklist)?state.checklist:DEF_CHECKLIST;
 function newChecklist(){const o={};CHECK_().forEach(i=>o[i.id]=false);return o;}
 function ensureChecklist(c){if(!c.checklist)c.checklist={};CHECK_().forEach(i=>{if(!(i.id in c.checklist))c.checklist[i.id]=false;});}
-function deliverDone(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]).length;}
+function deliverDone(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]===true).length;}
+function deliverNA(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]==='na').length;} // marcados como "não precisa"
+function deliverTotal(c){return CHECK_().length-deliverNA(c);} // total que conta no progresso
+function deliverComplete(c){return CHECK_().every(i=>c.checklist&&(c.checklist[i.id]===true||c.checklist[i.id]==='na'));}
 function applyDeliveryLink(ev){
   if(!ev||!ev.done)return;
   const t=TYPES_().find(x=>x.id===ev.type);if(!t||!t.link)return;
@@ -638,6 +649,7 @@ let currentUser=null;
 let tab='cal';            // 'cal' | 'clients'
 let view='day';
 let cursor=new Date();
+let hoursWeek=new Date();
 let editingId=null, draftType='outro', draftResp=null, draftDone=false;
 let fClient='', fResp='';            // calendar filters
 const isAdmin=()=>!!(currentUser&&currentUser.isAdmin);
@@ -661,6 +673,8 @@ function adminUsers(){return (state.users||[]).filter(u=>u.isAdmin);}
 function typeOf(id){return TYPES_().find(t=>t.id===id)||{id,em:'📌',label:'—',link:null};}
 function typeWantsLoc(typeId){const t=typeOf(typeId);return !!(t&&(t.id==='captacao'||/capta/i.test(t.label||'')));}
 function updateLocField(){const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';}
+function typeDur(typeId){const t=typeOf(typeId);return (t&&t.dur>0)?t.dur:60;} // tempo médio (min); padrão 60
+function eventDuration(ev){const s=toMin(ev.time),e=toMin(ev.end);if(s!=null&&e!=null&&e>s)return e-s;return typeDur(ev.type);} // real se houver início+fim; senão a média
 function clientById(id){return state.clients.find(c=>c.id===id);}
 function clientName(id){const c=clientById(id);return c?c.name:'(sem cliente)';}
 const toMin=t=>{if(!t)return null;const[h,m]=t.split(':').map(Number);return h*60+m;};
@@ -829,6 +843,7 @@ function render(){
       <button class="tab ${tab==='cal'?'on':''}" onclick="setTab('cal')">📅 Calendário</button>
       <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
       <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
+      <button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>
       <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
       <button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`;
     app.appendChild(nav);
@@ -836,6 +851,7 @@ function render(){
     else if(tab==='clients')renderClients(app);
     else if(tab==='tasks')renderTasks(app);
     else if(tab==='deliver')renderDeliver(app);
+    else if(tab==='horas')renderHours(app);
     else if(tab==='config')renderConfig(app);
     else renderCal(app);
   }else{
@@ -899,10 +915,10 @@ function renderDash(app){
   const attnHtml=attn.length?attn.map(c=>{const h=healthOf(c.health);return `<div class="attn-item" style="--h:${h.color}" onclick="setTab('clients');setTimeout(()=>openClient('${c.id}'),80)"><span class="hbadge" style="--h:${h.color}">${h.label}</span><b>${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}</b><span class="attn-pend">${clientPending(c.id)} pend.</span></div>`;}).join(''):'<div class="tp-empty">Nenhum cliente em alerta 🎉</div>';
   // entregas / onboarding
   cs.forEach(ensureChecklist);
-  const completos=cs.filter(c=>deliverDone(c)===CHECK_().length).length;
+  const completos=cs.filter(deliverComplete).length;
   const itensFeitos=cs.reduce((s,c)=>s+deliverDone(c),0), itensTotal=cs.length*CHECK_().length;
   const ovPct=itensTotal?Math.round(itensFeitos/itensTotal*100):0;
-  const itemRows=CHECK_().map(i=>{const n=cs.filter(c=>c.checklist&&c.checklist[i.id]).length;const p=total?Math.round(n/total*100):0;
+  const itemRows=CHECK_().map(i=>{const n=cs.filter(c=>c.checklist&&c.checklist[i.id]===true).length;const p=total?Math.round(n/total*100):0;
     return `<div class="loadrow"><span class="ln">${esc(i.label)}</span><div class="lbar"><span style="width:${p}%;background:var(--ok)"></span></div><span class="ln-n">${n}/${total}</span></div>`;}).join('');
   app.insertAdjacentHTML('beforeend',`
     <div class="dash">
@@ -922,6 +938,37 @@ function renderDash(app){
       <div class="panel"><h3>Precisam de atenção</h3><div class="attn">${attnHtml}</div></div>
       <div class="panel"><h3>Carga por responsável (demandas pendentes)</h3>${loadRows}</div>
     </div>`);
+}
+
+/* ---------- horas trabalhadas (admin) ---------- */
+function hoursStep(n){hoursWeek=new Date(hoursWeek);hoursWeek.setDate(hoursWeek.getDate()+7*n);render();}
+function hoursToday(){hoursWeek=new Date();render();}
+function renderHours(app){
+  const start=startOfWeek(hoursWeek);const end=new Date(start);end.setDate(start.getDate()+6);
+  const startIso=iso(start),endIso=iso(end);
+  const done=state.events.filter(e=>e.done&&e.date>=startIso&&e.date<=endIso);
+  const rows=state.users.map(u=>{
+    const evs=done.filter(e=>e.resp===u.id);
+    return {u,mins:evs.reduce((s,e)=>s+eventDuration(e),0),count:evs.length};
+  }).filter(r=>r.count>0).sort((a,b)=>b.mins-a.mins);
+  const totalMins=rows.reduce((s,r)=>s+r.mins,0);
+  const maxMins=Math.max(1,...rows.map(r=>r.mins));
+  const period=`${start.getDate()} ${MONTHS_S[start.getMonth()]} – ${end.getDate()} ${MONTHS_S[end.getMonth()]}`;
+  const list=rows.length?rows.map(r=>`
+    <div class="loadrow">
+      <span class="ln">${esc(r.u.name)}</span>
+      <div class="lbar"><span style="width:${r.mins/maxMins*100}%;background:${r.u.color||'#888'}"></span></div>
+      <span class="ln-n" style="width:110px">${fmtDur(r.mins)||'0min'} · ${r.count}</span>
+    </div>`).join(''):'<div class="empty-state">Nenhuma demanda concluída nesta semana.</div>';
+  app.insertAdjacentHTML('beforeend',`
+    <div class="toolbar">
+      <div class="nav"><button class="arrow" onclick="hoursStep(-1)">‹</button><div class="period">${period}</div><button class="arrow" onclick="hoursStep(1)">›</button></div>
+      <button class="btn ghost" onclick="hoursToday()">Esta semana</button>
+      <div class="spacer"></div>
+      <span class="mine-badge">⏱ ${fmtDur(totalMins)||'0min'} no total</span>
+    </div>
+    <div class="panel"><h3>Horas trabalhadas <span class="h3-side">por colaborador · demandas concluídas na semana</span></h3>${list}</div>
+    <div class="empty-hint" style="margin-top:10px">⏱ Conta a duração real (início–fim) de cada tarefa concluída; quando a tarefa não tem horário, usa o <b>tempo médio</b> configurado da demanda (Config). O número ao lado das horas = quantidade de tarefas concluídas.</div>`);
 }
 
 /* ---------- tasks board ---------- */
@@ -968,20 +1015,24 @@ function renderDeliverGrid(){
   if(!list.length){wrap.innerHTML=`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
   const grid=document.createElement('div');grid.className='deliver-grid';
   grid.innerHTML=list.map(c=>{
-    const done=deliverDone(c),tot=CHECK_().length,pct=Math.round(done/tot*100);
-    const items=CHECK_().map(i=>{const ok=!!(c.checklist&&c.checklist[i.id]);
-      return `<div class="dl-item ${ok?'ok':''}">
-        <span class="dl-label">${ok?'✔':'○'} ${esc(i.label)}</span>
-        <button class="dl-btn ${ok?'ok':''}" onclick="toggleDeliverable('${c.id}','${i.id}')">${ok?'Entregue':'Entregar'}</button>
+    const done=deliverDone(c),na=deliverNA(c),eff=deliverTotal(c),pct=eff>0?Math.round(done/eff*100):100;
+    const items=CHECK_().map(i=>{const v=c.checklist&&c.checklist[i.id];const ok=v===true,naItem=v==='na';
+      return `<div class="dl-item ${ok?'ok':''} ${naItem?'na':''}">
+        <span class="dl-label">${ok?'✔':naItem?'⊘':'○'} ${esc(i.label)}</span>
+        <div class="dl-actions">
+          <button class="dl-btn ${naItem?'na-on':''}" onclick="toggleDeliverNA('${c.id}','${i.id}')" title="Não precisa fazer">${naItem?'Não precisa':'N/A'}</button>
+          <button class="dl-btn ${ok?'ok':''}" onclick="toggleDeliverable('${c.id}','${i.id}')">${ok?'Entregue':'Entregar'}</button>
+        </div>
       </div>`;}).join('');
-    return `<div class="dcard ${done===tot?'complete':''}">
-      <div class="dc-head">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span><span class="dc-prog">${done}/${tot}</span></div>
+    return `<div class="dcard ${deliverComplete(c)?'complete':''}">
+      <div class="dc-head">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span><span class="dc-prog">${done}/${eff}${na?` · ${na} N/A`:''}</span></div>
       <div class="dc-bar"><span style="width:${pct}%"></span></div>
       <div class="dl-list">${items}</div></div>`;
   }).join('');
   wrap.innerHTML='';wrap.appendChild(grid);
 }
-function toggleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=!c.checklist[iid];touch(c);saveData();renderDeliverGrid();}
+function toggleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=(c.checklist[iid]===true)?false:true;touch(c);saveData();renderDeliverGrid();}
+function toggleDeliverNA(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=(c.checklist[iid]==='na')?false:'na';touch(c);saveData();renderDeliverGrid();}
 
 /* ---------- calendar tab ---------- */
 function renderCal(app){
@@ -1221,7 +1272,7 @@ function renderClientGrid(){
     const nx=clientNext(c.id);const pend=clientPending(c.id);const hl=healthOf(c.health);
     const nxTxt=nx?`Próx.: <b>${esc(typeOf(nx.type).label)}</b> · ${parseISO(nx.date).getDate()}/${pad(parseISO(nx.date).getMonth()+1)}`:'Sem tarefas futuras';
     return `<div class="ccard" onclick="openClient('${c.id}')">
-      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span><span class="hbadge" style="--h:${hl.color}">${hl.label}</span></div>
+      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.label}</span></div>
       <div class="cmeta"><span><span class="cdot" style="background:${respColor(c.owner)}"></span>${esc(respName(c.owner))}</span><span><b>${pend}</b> pend. · ${c.status}</span></div>
       <div class="cnext">${nxTxt}</div></div>`;
   }).join('');
@@ -1278,6 +1329,7 @@ function openClient(id){
   $('#clStatus').value=c.status;
   $('#clHealth').value=c.health||'bom';
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
+  $('#clDrive').value=c.driveUrl||'';
   renderTimeline();
   $('#clientScrim').classList.add('on');
 }
@@ -1294,8 +1346,12 @@ function renderTimeline(){
 function addTaskForClient(){const c=clientById(openClientId);closeClient();openEv(null,null,c?c.name:'');}
 function saveClient(){
   const c=clientById(openClientId);if(!c)return;
-  c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;touch(c);
+  c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
   saveData();closeClient();render();toast('Cliente atualizado');
+}
+function normUrl(u){return /^https?:\/\//i.test(u)?u:'https://'+u;}
+function openClientDrive(){const u=($('#clDrive').value||'').trim();if(!u){toast('Cole o link da pasta primeiro');return;}window.open(normUrl(u),'_blank');}
+function openClientCardDrive(cid){const c=clientById(cid);if(c&&c.driveUrl)window.open(normUrl(c.driveUrl),'_blank');
 }
 let delArmed=false, delTimer=null;
 function deleteClient(btn){
@@ -1345,7 +1401,8 @@ function openEv(id,presetDate,presetClient){
   $('#evScrim').classList.add('on');
 }
 function closeEv(){$('#evScrim').classList.remove('on');editingId=null;}
-function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;renderTypeBtns();renderRespBtns();updateLocField();}
+function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;renderTypeBtns();renderRespBtns();updateLocField();
+  const st=$('#fTime').value;if(st){const m=toMin(st)+typeDur(id);$('#fEnd').value=`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;updateDurHint();}}
 function renderTypeBtns(){$('#fTypes').innerHTML=TYPES_().map(t=>`<button class="typebtn${t.id===draftType?' on':''}" onclick="pickDemand('${t.id}')"><span class="em">${t.em}</span>${t.label}</button>`).join('');}
 function renderRespBtns(){
   const assigned=respForDemand(draftType);
@@ -1358,7 +1415,7 @@ function renderRespBtns(){
 }
 function toggleDone(){draftDone=!draftDone;renderDoneToggle();}
 function renderDoneToggle(){$('#fDone').classList.toggle('on',draftDone);$('#fDoneBox').textContent=draftDone?'✓':'';}
-function autoEnd(){const s=$('#fTime').value;const e=$('#fEnd').value;if(s&&!e){const m=toMin(s)+60;$('#fEnd').value=`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;}updateDurHint();}
+function autoEnd(){const s=$('#fTime').value;const e=$('#fEnd').value;if(s&&!e){const m=toMin(s)+typeDur(draftType);$('#fEnd').value=`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;}updateDurHint();}
 function updateDurHint(){
   const s=$('#fTime').value,e=$('#fEnd').value;const h=$('#durHint');
   if(s&&e){const d=toMin(e)-toMin(s);h.textContent=d>0?`⏱ Duração: ${fmtDur(d)}`:'⚠ O fim precisa ser depois do início';h.style.color=d>0?'var(--txt-faint)':'var(--danger)';}
@@ -1444,6 +1501,8 @@ function renderTypesList(){
       </div>
       <div class="cfg-link"><span class="cfg-link-lbl">Ao concluir, marca a entrega:</span>
         <select class="t" onchange="typesDraft[${i}].link=this.value||null">${linkOpts(t.link)}</select></div>
+      <div class="cfg-link" style="margin-top:8px"><span class="cfg-link-lbl">⏱ Tempo médio (min):</span>
+        <input class="t" type="number" min="0" step="5" style="max-width:130px" value="${t.dur||''}" placeholder="60" oninput="typesDraft[${i}].dur=parseInt(this.value)||0"></div>
     </div>`).join('');
 }
 function addType(){typesDraft.push({id:uid(),em:'📌',label:'',link:null});renderTypesList();renderCfgList();}
@@ -1468,7 +1527,7 @@ function saveConfig(){
   const check=checkDraft.filter(c=>c.label.trim());
   const validLinks=new Set(check.map(c=>c.id));
   state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
-  state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null}));
+  state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
   state.clients.forEach(ensureChecklist);
   currentUser=state.users.find(u=>u.id===(currentUser&&currentUser.id))||currentUser;

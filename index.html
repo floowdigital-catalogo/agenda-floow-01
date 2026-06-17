@@ -650,6 +650,7 @@ let tab='cal';            // 'cal' | 'clients'
 let view='day';
 let cursor=new Date();
 let hoursWeek=new Date();
+let hoursView='week'; // 'day' | 'week' | 'month' no relatório de Horas
 let editingId=null, draftType='outro', draftResp=null, draftDone=false;
 let fClient='', fResp='';            // calendar filters
 const isAdmin=()=>!!(currentUser&&currentUser.isAdmin);
@@ -941,33 +942,37 @@ function renderDash(app){
 }
 
 /* ---------- horas trabalhadas (admin) ---------- */
-function hoursStep(n){hoursWeek=new Date(hoursWeek);hoursWeek.setDate(hoursWeek.getDate()+7*n);render();}
+function setHoursView(v){hoursView=v;render();}
+function hoursStep(n){const d=new Date(hoursWeek);if(hoursView==='day')d.setDate(d.getDate()+n);else if(hoursView==='month')d.setMonth(d.getMonth()+n);else d.setDate(d.getDate()+7*n);hoursWeek=d;render();}
 function hoursToday(){hoursWeek=new Date();render();}
 function renderHours(app){
-  const start=startOfWeek(hoursWeek);const end=new Date(start);end.setDate(start.getDate()+6);
-  const startIso=iso(start),endIso=iso(end);
+  const c=hoursWeek;let startIso,endIso,period,scope;
+  if(hoursView==='day'){startIso=endIso=iso(c);period=`${DOW[c.getDay()]}, ${c.getDate()} ${MONTHS_S[c.getMonth()]}`;scope='no dia';}
+  else if(hoursView==='month'){const s=new Date(c.getFullYear(),c.getMonth(),1),e=new Date(c.getFullYear(),c.getMonth()+1,0);startIso=iso(s);endIso=iso(e);period=`${MONTHS[c.getMonth()]} ${c.getFullYear()}`;scope='no mês';}
+  else{const s=startOfWeek(c),e=new Date(s);e.setDate(s.getDate()+6);startIso=iso(s);endIso=iso(e);period=`${s.getDate()} ${MONTHS_S[s.getMonth()]} – ${e.getDate()} ${MONTHS_S[e.getMonth()]}`;scope='na semana';}
   const done=state.events.filter(e=>e.done&&e.date>=startIso&&e.date<=endIso);
-  const rows=state.users.map(u=>{
-    const evs=done.filter(e=>e.resp===u.id);
-    return {u,mins:evs.reduce((s,e)=>s+eventDuration(e),0),count:evs.length};
-  }).filter(r=>r.count>0).sort((a,b)=>b.mins-a.mins);
+  const rows=state.users.map(u=>{const evs=done.filter(e=>e.resp===u.id);return {u,mins:evs.reduce((s,e)=>s+eventDuration(e),0),count:evs.length};}).filter(r=>r.count>0).sort((a,b)=>b.mins-a.mins);
   const totalMins=rows.reduce((s,r)=>s+r.mins,0);
   const maxMins=Math.max(1,...rows.map(r=>r.mins));
-  const period=`${start.getDate()} ${MONTHS_S[start.getMonth()]} – ${end.getDate()} ${MONTHS_S[end.getMonth()]}`;
   const list=rows.length?rows.map(r=>`
     <div class="loadrow">
       <span class="ln">${esc(r.u.name)}</span>
       <div class="lbar"><span style="width:${r.mins/maxMins*100}%;background:${r.u.color||'#888'}"></span></div>
       <span class="ln-n" style="width:110px">${fmtDur(r.mins)||'0min'} · ${r.count}</span>
-    </div>`).join(''):'<div class="empty-state">Nenhuma demanda concluída nesta semana.</div>';
+    </div>`).join(''):`<div class="empty-state">Nenhuma demanda concluída ${scope}.</div>`;
   app.insertAdjacentHTML('beforeend',`
     <div class="toolbar">
       <div class="nav"><button class="arrow" onclick="hoursStep(-1)">‹</button><div class="period">${period}</div><button class="arrow" onclick="hoursStep(1)">›</button></div>
-      <button class="btn ghost" onclick="hoursToday()">Esta semana</button>
+      <button class="btn ghost" onclick="hoursToday()">Hoje</button>
+      <div class="seg">
+        <button class="${hoursView==='day'?'on':''}" onclick="setHoursView('day')">Dia</button>
+        <button class="${hoursView==='week'?'on':''}" onclick="setHoursView('week')">Semana</button>
+        <button class="${hoursView==='month'?'on':''}" onclick="setHoursView('month')">Mês</button>
+      </div>
       <div class="spacer"></div>
-      <span class="mine-badge">⏱ ${fmtDur(totalMins)||'0min'} no total</span>
+      <span class="mine-badge">⏱ ${fmtDur(totalMins)||'0min'}</span>
     </div>
-    <div class="panel"><h3>Horas trabalhadas <span class="h3-side">por colaborador · demandas concluídas na semana</span></h3>${list}</div>
+    <div class="panel"><h3>Horas trabalhadas <span class="h3-side">por colaborador · concluídas ${scope}</span></h3>${list}</div>
     <div class="empty-hint" style="margin-top:10px">⏱ Conta a duração real (início–fim) de cada tarefa concluída; quando a tarefa não tem horário, usa o <b>tempo médio</b> configurado da demanda (Config). O número ao lado das horas = quantidade de tarefas concluídas.</div>`);
 }
 
@@ -1501,10 +1506,15 @@ function renderTypesList(){
       </div>
       <div class="cfg-link"><span class="cfg-link-lbl">Ao concluir, marca a entrega:</span>
         <select class="t" onchange="typesDraft[${i}].link=this.value||null">${linkOpts(t.link)}</select></div>
-      <div class="cfg-link" style="margin-top:8px"><span class="cfg-link-lbl">⏱ Tempo médio (min):</span>
-        <input class="t" type="number" min="0" step="5" style="max-width:130px" value="${t.dur||''}" placeholder="60" oninput="typesDraft[${i}].dur=parseInt(this.value)||0"></div>
+      <div class="cfg-link" style="margin-top:8px">
+        <span class="cfg-link-lbl">⏱ Tempo médio:</span>
+        <span style="display:flex;align-items:center;gap:6px">
+          <input class="t" type="number" min="0" id="durH${i}" style="width:62px" value="${Math.floor((t.dur||0)/60)||''}" placeholder="0" oninput="recalcTypeDur(${i})"><span class="cfg-link-lbl">h</span>
+          <input class="t" type="number" min="0" max="59" id="durM${i}" style="width:62px" value="${(t.dur||0)%60||''}" placeholder="0" oninput="recalcTypeDur(${i})"><span class="cfg-link-lbl">min</span>
+        </span></div>
     </div>`).join('');
 }
+function recalcTypeDur(i){const h=parseInt($('#durH'+i).value)||0;const m=parseInt($('#durM'+i).value)||0;typesDraft[i].dur=h*60+m;}
 function addType(){typesDraft.push({id:uid(),em:'📌',label:'',link:null});renderTypesList();renderCfgList();}
 
 function renderCheckList(){

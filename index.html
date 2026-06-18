@@ -888,7 +888,7 @@ function renderUserChip(){
   const hasNotif=('Notification' in window);
   const notifOn=hasNotif&&Notification.permission==='granted';
   const notifBtn=hasNotif?`<button class="uc-btn" onclick="requestNotifyPermission()" title="${notifOn?'Avisos de tarefas ativados':'Ativar avisos de tarefas (20 min antes)'}">${notifOn?'🔔':'🔕'}</button>`:'';
-  const gBtn=(isAdmin()&&googleClientId())?`<button class="uc-btn" onclick="connectGoogle()" title="${gConnectedFlag()?'Google Agenda conectado (reconectar)':'Conectar Google Agenda'}">${gConnectedFlag()?'📅✓':'📅'}</button>`:'';
+  const gBtn=(isAdmin()&&googleClientId())?`<button class="uc-btn" onclick="connectGoogle()" title="${gConnectedFlag()?'Google conectado (reconectar)':'Conectar Google Drive'}">${gConnectedFlag()?'🔗✓':'🔗'}</button>`:'';
   $('#userChip').innerHTML=`
     <span class="uc-dot" style="background:${currentUser.color||'#888'}"></span>
     <span class="uc-name">${esc(currentUser.name)}</span>
@@ -1261,7 +1261,7 @@ function renderClients(app){
 }
 function addQuick(){
   const inp=$('#qaInput');const name=(inp.value||'').trim();if(!name){inp.focus();return;}
-  const id=findOrCreateClient(name);saveData();inp.value='';renderClientGrid();inp.focus();
+  const id=findOrCreateClient(name);saveData();const _c=clientById(id);if(_c)createClientDriveFolders(_c);inp.value='';renderClientGrid();inp.focus();
   toast('Cliente adicionado ✓');
 }
 function renderClientGrid(){
@@ -1302,7 +1302,7 @@ function saveAdd(){
   const ex=state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase());
   if(ex){toast('Cliente já existe');closeAdd();openClient(ex.id);return;}
   const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:$('#aHealth').value,owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
-  state.clients.push(c);saveData();closeAdd();render();openClient(c.id);toast('Cliente cadastrado ✓');
+  state.clients.push(c);saveData();closeAdd();render();openClient(c.id);createClientDriveFolders(c);toast('Cliente cadastrado ✓');
 }
 /* bulk import modal */
 function openBulk(){$('#bulkText').value='';updateBulkPreview();$('#bulkScrim').classList.add('on');setTimeout(()=>$('#bulkText').focus(),30);}
@@ -1450,14 +1450,16 @@ function renderConfig(app){
   cfgDraft=state.users.map(u=>({...u,demands:[...(u.demands||[])]}));
   typesDraft=state.types.map(t=>({...t}));
   checkDraft=state.checklist.map(c=>({...c}));
+  driveDraft={root:state.driveRoot||'',tree:state.driveTree||DEFAULT_DRIVE_TREE};
   app.insertAdjacentHTML('beforeend',`
     <div class="cfg-sec-h">👤 Usuários e responsabilidades</div>
     <div class="empty-hint" style="margin:-6px 0 12px">Marque de quais demandas cada pessoa é responsável.</div>
     <div id="cfgList"></div>
     <button class="btn ghost cfg-add" onclick="addCfgUser()">+ Adicionar usuário</button>
 
-    ${googleClientId()?`<div class="cfg-sec-h">📅 Google Agenda <span class="cfg-side">conecte seu Google e marque "📅 Google" nos usuários cujas entregas devem ir para o Google Agenda</span></div>
-    <div class="cfg-card" id="gcalCfg"></div>`:''}
+    ${googleClientId()?`<div class="cfg-sec-h">🔗 Google Drive <span class="cfg-side">cria as pastas dos clientes automaticamente no seu Drive</span></div>
+    <div class="cfg-card" id="gcalCfg"></div>
+    <div class="cfg-card" id="driveCfg"></div>`:''}
 
     <div class="cfg-sec-h">🗂️ Demandas <span class="cfg-side">o que aparece ao criar uma entrega · vincule a uma entrega para marcar automático</span></div>
     <div id="typesList"></div>
@@ -1469,7 +1471,7 @@ function renderConfig(app){
 
     <div class="empty-hint" style="margin-top:12px">⚠️ As senhas ficam guardadas no painel sem criptografia — controle interno de equipe.</div>
     <div class="modal-actions" style="max-width:320px"><button class="btn primary" style="flex:1;justify-content:center" onclick="saveConfig()">Salvar tudo</button></div>`);
-  renderCfgList();renderTypesList();renderCheckList();renderGcalConfig();
+  renderCfgList();renderTypesList();renderCheckList();renderGcalConfig();renderDriveConfig();
 }
 const DEMAND_OPTS=()=>typesDraft.filter(t=>t.id!=='outro');
 function renderCfgList(){
@@ -1480,7 +1482,6 @@ function renderCfgList(){
         <input type="color" class="tcolor" value="${u.color||'#888888'}" oninput="cfgDraft[${i}].color=this.value">
         <input class="t uname" value="${esc(u.name)}" placeholder="Nome" oninput="cfgDraft[${i}].name=this.value">
         <label class="uadmin"><input type="checkbox" ${u.isAdmin?'checked':''} onchange="cfgDraft[${i}].isAdmin=this.checked;renderCfgList()"> Admin</label>
-        ${googleClientId()?`<label class="uadmin" title="Criar as entregas desta pessoa no Google Agenda"><input type="checkbox" ${u.googleSync?'checked':''} onchange="cfgDraft[${i}].googleSync=this.checked"> 📅 Google</label>`:''}
         <button class="rm" onclick="cfgDraft.splice(${i},1);renderCfgList()">×</button>
       </div>
       <div class="cfg-grid2">
@@ -1539,6 +1540,7 @@ function saveConfig(){
   state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
   state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
+  if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');}
   state.clients.forEach(ensureChecklist);
   currentUser=state.users.find(u=>u.id===(currentUser&&currentUser.id))||currentUser;
   saveData();render();toast('Configurações salvas ✓');
@@ -1575,7 +1577,7 @@ function doCopy(){const txt=buildCopyText();const ta=document.createElement('tex
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
 
 /* ---------- integração com o Google Agenda ---------- */
-const GCAL_SCOPE='https://www.googleapis.com/auth/calendar.events';
+const GCAL_SCOPE='https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.events'; // Drive (pastas) + Agenda
 const GCAL_TZ='America/Sao_Paulo';
 let gAccessToken=null, gTokenClient=null, gTokenExpiry=0, gPendingAfterAuth=null;
 function googleClientId(){return window.GOOGLE_CLIENT_ID||'';}
@@ -1659,10 +1661,81 @@ function renderGcalConfig(){
     <div class="cfg-row" style="flex-wrap:wrap;gap:10px">
       <div style="flex:1;min-width:170px">
         <div style="font-weight:700">${conn?'✅ Google conectado':'Google não conectado'}</div>
-        <div class="empty-hint" style="margin:4px 0 0">${idSet?'As entregas dos usuários marcados com 📅 viram evento no Google e o responsável é convidado pelo e-mail.':'⚠️ Falta a credencial do Google (VITE_GOOGLE_CLIENT_ID na Vercel). Veja o guia GOOGLE.md.'}</div>
+        <div class="empty-hint" style="margin:4px 0 0">${idSet?'Conecte sua conta Google para o app criar as pastas dos clientes no seu Drive ao cadastrar.':'⚠️ Falta a credencial do Google (VITE_GOOGLE_CLIENT_ID na Vercel). Veja o guia GOOGLE.md.'}</div>
       </div>
       <button class="btn ${conn?'':'primary'}" onclick="connectGoogle()">${conn?'Reconectar Google':'Conectar Google'}</button>
     </div>`;
+}
+/* ---------- Google Drive: criar pastas do cliente (com níveis) ---------- */
+let driveDraft=null;
+const DEFAULT_DRIVE_TREE=`Criativos assertivos
+  Roteiro de criativos
+  Referências Modelo
+  Material Bruto
+  Identidade visual
+  Criativos prontos
+  Concorrentes
+  Brief dos criativos
+Otimização comercial
+Gestão de mídias pagas
+Estruturação estratégica
+Administrativo`;
+function driveFolderId(urlOrId){if(!urlOrId)return '';const m=String(urlOrId).match(/[-\w]{25,}/);return m?m[0]:String(urlOrId).trim();}
+function driveCreateFolder(name,parentId){
+  const body={name:name,mimeType:'application/vnd.google-apps.folder'};
+  if(parentId)body.parents=[parentId];
+  return fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink',{
+    method:'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(body)
+  }).then(r=>r.json());
+}
+function parseDriveTree(text){
+  const lines=String(text||'').split('\n').filter(l=>l.trim());
+  const root=[];const stack=[{depth:-1,children:root}];
+  for(const raw of lines){
+    const lead=(raw.match(/^[\t ]*/)||[''])[0].replace(/\t/g,'  ');
+    const depth=Math.floor(lead.length/2);
+    const node={name:raw.trim(),children:[]};
+    while(stack.length>1&&stack[stack.length-1].depth>=depth)stack.pop();
+    stack[stack.length-1].children.push(node);
+    stack.push({depth,children:node.children});
+  }
+  return root;
+}
+async function driveCreateTree(nodes,parentId,prefix){
+  for(const n of nodes){
+    const f=await driveCreateFolder((prefix||'')+n.name,parentId);
+    if(f&&f.id&&n.children&&n.children.length)await driveCreateTree(n.children,f.id,''); // níveis internos sem prefixo
+  }
+}
+function createClientDriveFolders(client){
+  if(!client||!gConnectedFlag()||!state.driveRoot)return; // só se conectado e com pasta raiz definida
+  if(client.driveUrl)return; // já tem pasta
+  gEnsureToken(async()=>{
+    try{
+      const root=driveFolderId(state.driveRoot);
+      const pref=client.code?('#'+client.code+' | '):'';
+      const folder=await driveCreateFolder(pref+client.name,root); // pasta do cliente: "#cód | Nome"
+      if(!folder||!folder.id){toast('⚠️ Não consegui criar a pasta no Drive (permissão de Editor?)');return;}
+      client.driveUrl=folder.webViewLink||('https://drive.google.com/drive/folders/'+folder.id);
+      touch(client);saveData();
+      if(openClientId===client.id&&$('#clDrive'))$('#clDrive').value=client.driveUrl;
+      if(tab==='clients')renderClientGrid();
+      toast('📁 Criando pastas de '+client.name+'…');
+      const tree=parseDriveTree(state.driveTree||'');
+      await driveCreateTree(tree,folder.id,pref); // subpastas de 1º nível levam o prefixo "#cód | "
+      toast('📁 Pastas criadas no Drive: '+client.name);
+    }catch(e){console.warn('drive',e);toast('⚠️ Falha ao criar pasta no Drive');}
+  });
+}
+function renderDriveConfig(){
+  const wrap=$('#driveCfg');if(!wrap)return;
+  wrap.innerHTML=`
+    <div class="cfg-dem-lbl" style="margin-bottom:7px">📁 Ao cadastrar um cliente, cria a pasta dele (e a árvore de subpastas) no Drive</div>
+    <label class="f" style="margin-top:2px">Pasta raiz (link da pasta do Drive onde os clientes serão criados)</label>
+    <input class="t" value="${esc(driveDraft.root)}" placeholder="Cole o link da pasta (ex.: a pasta 'Projetos')…" oninput="driveDraft.root=this.value">
+    <label class="f" style="margin-top:12px">Estrutura de subpastas <span style="text-transform:none;color:var(--txt-faint)">(2 espaços = subpasta dentro de subpasta)</span></label>
+    <textarea class="t" id="driveTreeInput" style="min-height:210px;font-family:monospace;font-size:13px;white-space:pre" oninput="driveDraft.tree=this.value">${esc(driveDraft.tree)}</textarea>
+    <div class="empty-hint" style="margin-top:6px">As subpastas de 1º nível recebem o prefixo <b>#código |</b> do cliente automaticamente. Os níveis mais internos ficam sem prefixo.</div>`;
 }
 
 /* ---------- notificações: avisar 20 min antes de cada tarefa ---------- */

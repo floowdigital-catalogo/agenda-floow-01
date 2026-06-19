@@ -8,6 +8,10 @@
 
 import { initStorageBackend } from './storage.js'
 
+// Client ID do Google (OAuth) — usado pela integração com o Google Agenda.
+// Definido na Vercel como VITE_GOOGLE_CLIENT_ID (opcional; sem ele a integração fica inativa).
+window.GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
 initStorageBackend()
   .catch(err => console.error('[storage] erro ao iniciar backend', err))
   .finally(() => {

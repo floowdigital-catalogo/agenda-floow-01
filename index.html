@@ -360,6 +360,14 @@
   .dl-actions{display:flex;gap:6px;flex:none}
   .dl-item.na .dl-label{opacity:.75;text-decoration:line-through;color:#B57BEE}
   .dl-btn.na-on{background:color-mix(in srgb,#B57BEE 22%,transparent);border-color:color-mix(in srgb,#B57BEE 55%,transparent);color:#cdaef7}
+  /* financeiro */
+  .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+  .fin-row:last-child{border-bottom:none}
+  .fin-name{flex:1;min-width:150px;font-weight:600;font-size:13.5px}
+  .fin-cell{display:flex;align-items:center;gap:6px}
+  .fin-cell .fin-lbl{font-size:11px;color:var(--txt-faint);white-space:nowrap}
+  .fin-cell input{width:100px}
+  .exp-row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
 
   /* grade do dia rolável (mostra as 24h sem esticar a página) */
   .daygrid-wrap{max-height:72vh;overflow:auto;border-radius:12px;border:1px solid var(--line-soft)}
@@ -680,6 +688,7 @@ function clientById(id){return state.clients.find(c=>c.id===id);}
 function clientName(id){const c=clientById(id);return c?c.name:'(sem cliente)';}
 const toMin=t=>{if(!t)return null;const[h,m]=t.split(':').map(Number);return h*60+m;};
 const fmtDur=min=>{if(min<=0)return'';const h=Math.floor(min/60),m=min%60;return h?(m?`${h}h${pad(m)}`:`${h}h`):`${m}min`;};
+const fmtBRL=n=>'R$ '+(Number(n)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtRange=ev=>ev.time?(ev.end?`${ev.time}–${ev.end}`:ev.time):'';
 const addMinHHMM=(t,min)=>{const m=toMin(t)+min;return `${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;};
 const nextDay=isoStr=>{const d=parseISO(isoStr);d.setDate(d.getDate()+1);return iso(d);};
@@ -697,6 +706,7 @@ async function load(){
   if(!state.users)state.users=[];
   if(!state.types)state.types=JSON.parse(JSON.stringify(DEF_TYPES));
   if(!state.checklist)state.checklist=JSON.parse(JSON.stringify(DEF_CHECKLIST));
+  if(!state.expenses)state.expenses=[];
   if(!state.tombstones)state.tombstones={events:{},clients:{}};
   if(!state.tombstones.events)state.tombstones.events={};
   if(!state.tombstones.clients)state.tombstones.clients={};
@@ -845,6 +855,7 @@ function render(){
       <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
       <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
       <button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>
+      <button class="tab ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>
       <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
       <button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`;
     app.appendChild(nav);
@@ -853,6 +864,7 @@ function render(){
     else if(tab==='tasks')renderTasks(app);
     else if(tab==='deliver')renderDeliver(app);
     else if(tab==='horas')renderHours(app);
+    else if(tab==='financeiro')renderFinance(app);
     else if(tab==='config')renderConfig(app);
     else renderCal(app);
   }else{
@@ -939,6 +951,41 @@ function renderDash(app){
       <div class="panel"><h3>Precisam de atenção</h3><div class="attn">${attnHtml}</div></div>
       <div class="panel"><h3>Carga por responsável (demandas pendentes)</h3>${loadRows}</div>
     </div>`);
+}
+
+/* ---------- financeiro (admin) ---------- */
+function setClientBilling(cid,v){const c=clientById(cid);if(!c)return;c.billingDay=parseInt(v)||0;touch(c);saveData();renderFinanceInner();}
+function setClientContract(cid,v){const c=clientById(cid);if(!c)return;c.contractValue=Number(v)||0;touch(c);saveData();renderFinanceInner();}
+function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',value:0});saveData();renderFinanceInner();}
+function setExpenseField(id,field,v){const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;e[field]=(field==='value')?(Number(v)||0):v;saveData();renderFinanceInner();}
+function removeExpense(id){state.expenses=(state.expenses||[]).filter(x=>x.id!==id);saveData();renderFinanceInner();}
+function renderFinance(app){app.insertAdjacentHTML('beforeend','<div id="financeWrap"></div>');renderFinanceInner();}
+function renderFinanceInner(){
+  const wrap=$('#financeWrap');if(!wrap)return;
+  const cs=state.clients.slice().sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
+  const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+(Number(c.contractValue)||0),0);
+  const desp=(state.expenses||[]).reduce((s,e)=>s+(Number(e.value)||0),0);
+  const lucro=mrr-desp;
+  const rows=cs.map(c=>`
+    <div class="fin-row">
+      <span class="fin-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
+      <span class="fin-cell"><span class="fin-lbl">Cobrança dia</span><input class="t" type="number" min="1" max="31" value="${c.billingDay||''}" placeholder="—" onchange="setClientBilling('${c.id}',this.value)"></span>
+      <span class="fin-cell"><span class="fin-lbl">Contrato R$</span><input class="t" type="number" min="0" step="50" value="${c.contractValue||''}" placeholder="0" onchange="setClientContract('${c.id}',this.value)"></span>
+    </div>`).join('');
+  const expRows=(state.expenses||[]).length?(state.expenses||[]).map(e=>`
+    <div class="exp-row">
+      <input class="t" value="${esc(e.desc)}" placeholder="Descrição (ex.: Tráfego, ferramentas, salários…)" onchange="setExpenseField('${e.id}','desc',this.value)" style="flex:1">
+      <input class="t" type="number" min="0" step="10" value="${e.value||''}" placeholder="0" onchange="setExpenseField('${e.id}','value',this.value)" style="width:130px">
+      <button class="rm" onclick="removeExpense('${e.id}')">×</button>
+    </div>`).join(''):'<div class="empty-hint">Nenhuma despesa cadastrada.</div>';
+  wrap.innerHTML=`
+    <div class="metrics" style="margin-bottom:15px">
+      <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
+      <div class="metric"><div class="mv">${fmtBRL(desp)}</div><div class="ml">Despesas mensais</div></div>
+      <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
+    </div>
+    <div class="panel"><h3>Contratos por cliente <span class="h3-side">dia de cobrança · valor mensal</span></h3>${rows||'<div class="empty-hint">Nenhum cliente.</div>'}</div>
+    <div class="panel"><h3>Despesas mensais <span class="h3-side">${fmtBRL(desp)}</span></h3>${expRows}<button class="btn ghost cfg-add" onclick="addExpense()" style="margin-top:10px">+ Adicionar despesa</button></div>`;
 }
 
 /* ---------- horas trabalhadas (admin) ---------- */
@@ -1450,7 +1497,9 @@ function renderConfig(app){
   cfgDraft=state.users.map(u=>({...u,demands:[...(u.demands||[])]}));
   typesDraft=state.types.map(t=>({...t}));
   checkDraft=state.checklist.map(c=>({...c}));
-  driveDraft={root:state.driveRoot||'',tree:state.driveTree||DEFAULT_DRIVE_TREE};
+  driveDraft={root:state.driveRoot||'',tree:state.driveTree||DEFAULT_DRIVE_TREE,
+    shareEmails:(state.driveShareEmails&&state.driveShareEmails.length)?state.driveShareEmails.join(', '):'luan@floowdigital.com, yuri@floowdigital.com',
+    shareFolders:(state.driveShareFolders&&state.driveShareFolders.length)?state.driveShareFolders.join('\n'):'Criativos assertivos\nEstruturação estratégica'};
   app.insertAdjacentHTML('beforeend',`
     <div class="cfg-sec-h">👤 Usuários e responsabilidades</div>
     <div class="empty-hint" style="margin:-6px 0 12px">Marque de quais demandas cada pessoa é responsável.</div>
@@ -1540,7 +1589,9 @@ function saveConfig(){
   state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
   state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
-  if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');}
+  if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');
+    state.driveShareEmails=(driveDraft.shareEmails||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
+    state.driveShareFolders=(driveDraft.shareFolders||'').split('\n').map(s=>s.trim()).filter(Boolean);}
   state.clients.forEach(ensureChecklist);
   currentUser=state.users.find(u=>u.id===(currentUser&&currentUser.id))||currentUser;
   saveData();render();toast('Configurações salvas ✓');
@@ -1701,10 +1752,24 @@ function parseDriveTree(text){
   }
   return root;
 }
+function driveShareFolder(fileId,email){
+  return fetch('https://www.googleapis.com/drive/v3/files/'+fileId+'/permissions?sendNotificationEmail=false&fields=id',{
+    method:'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},
+    body:JSON.stringify({role:'writer',type:'user',emailAddress:email})
+  }).then(r=>r.json());
+}
 async function driveCreateTree(nodes,parentId,prefix){
+  const shareNames=state.driveShareFolders||[];
+  const shareEmails=state.driveShareEmails||[];
   for(const n of nodes){
     const f=await driveCreateFolder((prefix||'')+n.name,parentId);
-    if(f&&f.id&&n.children&&n.children.length)await driveCreateTree(n.children,f.id,''); // níveis internos sem prefixo
+    if(f&&f.id){
+      // subpastas de 1º nível (com prefixo) que estão na lista → compartilha com os e-mails
+      if(prefix&&shareNames.includes(n.name)){
+        for(const em of shareEmails){if(em&&em.trim())await driveShareFolder(f.id,em.trim());}
+      }
+      if(n.children&&n.children.length)await driveCreateTree(n.children,f.id,''); // níveis internos sem prefixo
+    }
   }
 }
 function createClientDriveFolders(client){
@@ -1735,7 +1800,11 @@ function renderDriveConfig(){
     <input class="t" value="${esc(driveDraft.root)}" placeholder="Cole o link da pasta (ex.: a pasta 'Projetos')…" oninput="driveDraft.root=this.value">
     <label class="f" style="margin-top:12px">Estrutura de subpastas <span style="text-transform:none;color:var(--txt-faint)">(2 espaços = subpasta dentro de subpasta)</span></label>
     <textarea class="t" id="driveTreeInput" style="min-height:210px;font-family:monospace;font-size:13px;white-space:pre" oninput="driveDraft.tree=this.value">${esc(driveDraft.tree)}</textarea>
-    <div class="empty-hint" style="margin-top:6px">As subpastas de 1º nível recebem o prefixo <b>#código |</b> do cliente automaticamente. Os níveis mais internos ficam sem prefixo.</div>`;
+    <div class="empty-hint" style="margin-top:6px">As subpastas de 1º nível recebem o prefixo <b>#código |</b> do cliente automaticamente. Os níveis mais internos ficam sem prefixo.</div>
+    <label class="f" style="margin-top:14px">🤝 Acesso automático — e-mails <span style="text-transform:none;color:var(--txt-faint)">(separados por vírgula; ganham acesso de Editor)</span></label>
+    <input class="t" value="${esc(driveDraft.shareEmails)}" placeholder="luan@floowdigital.com, yuri@floowdigital.com" oninput="driveDraft.shareEmails=this.value">
+    <label class="f" style="margin-top:10px">Pastas que esses e-mails recebem <span style="text-transform:none;color:var(--txt-faint)">(uma por linha, nome exato da subpasta)</span></label>
+    <textarea class="t" style="min-height:60px;font-family:monospace;font-size:13px;white-space:pre" oninput="driveDraft.shareFolders=this.value">${esc(driveDraft.shareFolders)}</textarea>`;
 }
 
 /* ---------- notificações: avisar 20 min antes de cada tarefa ---------- */

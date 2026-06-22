@@ -92,6 +92,7 @@
   .tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line-soft);padding-bottom:0}
   .tab{padding:10px 16px;font-size:14px;font-weight:700;color:var(--txt-faint);border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:7px}
   .tab.on{color:var(--txt);border-color:var(--brand)}
+  .tab.sep{border-left:1px solid var(--line);margin-left:8px;padding-left:18px}
   .tab .badge{background:var(--surface-2);color:var(--txt-dim);font-size:11px;font-weight:700;padding:1px 7px;border-radius:20px}
 
   .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--ink-2);border:1px solid var(--line-soft);border-radius:var(--radius);padding:11px 13px;margin-bottom:16px}
@@ -531,6 +532,10 @@
   <div class="modal wide">
     <h2 id="clTitle">Cliente <span class="x" onclick="closeClient()">&times;</span></h2>
     <div class="two">
+      <div style="flex:2"><label class="f">Nome</label><input class="t" id="clName"></div>
+      <div><label class="f">Código</label><input class="t" id="clCode" placeholder="Ex: 67"></div>
+    </div>
+    <div class="two">
       <div>
         <label class="f">Situação</label>
         <select class="t" id="clHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select>
@@ -583,7 +588,7 @@
     <input class="t" id="aName" placeholder="Ex: Brizzon Jeans" onkeydown="if(event.key==='Enter')saveAdd()">
     <div class="two">
       <div><label class="f">Código <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aCode" placeholder="Ex: 67"></div>
-      <div><label class="f">Situação</label><select class="t" id="aHealth"><option value="excelente">Excelente</option><option value="bom" selected>Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select></div>
+      <div><label class="f">Situação</label><select class="t" id="aHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante" selected>Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select></div>
     </div>
     <div class="two">
       <div><label class="f">Status</label><select class="t" id="aStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select></div>
@@ -825,7 +830,7 @@ function pmId(){const a=adminUsers()[0];return a?a.id:(state.users[0]&&state.use
 function findOrCreateClient(raw){
   const p=parseClientLine(raw);if(!p||!p.name)return null;
   let c=state.clients.find(x=>x.name.toLowerCase()===p.name.toLowerCase());
-  if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()};state.clients.push(c);}
+  if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'iniciante',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()};state.clients.push(c);}
   return c.id;
 }
 function clientPending(id){return state.events.filter(e=>e.clientId===id&&!e.done).length;}
@@ -855,7 +860,7 @@ function render(){
       <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
       <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
       <button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>
-      <button class="tab ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>
+      <button class="tab sep ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>
       <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
       <button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`;
     app.appendChild(nav);
@@ -1296,12 +1301,8 @@ function renderClients(app){
       <option value="all">Todos (${state.clients.length})</option><option value="ativo">Ativos</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados</option>
     </select>
     <div class="spacer"></div>
-    <div class="quickadd">
-      <input id="qaInput" placeholder="Nome do novo cliente…" onkeydown="if(event.key==='Enter')addQuick()">
-      <button onclick="addQuick()">+ Adicionar</button>
-    </div>
     <button class="btn" onclick="openBulk()">📥 Importar lista</button>
-    <button class="btn" onclick="openAdd()" title="Cadastro com detalhes">⋯</button>`;
+    <button class="btn primary" onclick="openAdd()">+ Novo cliente</button>`;
   app.appendChild(bar);
   const wrap=document.createElement('div');wrap.id='clientGridWrap';app.appendChild(wrap);
   renderClientGrid();
@@ -1366,7 +1367,7 @@ function doBulk(){
   if(!lines.length){toast('Nada para importar');return;}
   const names=new Set(state.clients.map(c=>c.name.toLowerCase()));let added=0;
   lines.forEach(l=>{const key=l.name.toLowerCase();if(names.has(key))return;
-    state.clients.push({id:uid(),code:l.code,name:l.name,status:'ativo',health:'bom',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()});
+    state.clients.push({id:uid(),code:l.code,name:l.name,status:'ativo',health:'iniciante',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()});
     names.add(key);added++;});
   saveData();closeBulk();render();toast(`${added} cliente(s) importado(s) ✓`);
 }
@@ -1378,6 +1379,8 @@ function openClient(id){
   const db=document.querySelector('#clientScrim .btn.del');if(db){db.textContent='Excluir cliente';db.classList.remove('armed');}
   clientDraftStatus=c.status;clientDraftOwner=c.owner;
   $('#clTitle').childNodes[0].nodeValue=(c.code?'#'+c.code+' · ':'')+c.name+' ';
+  $('#clName').value=c.name||'';
+  $('#clCode').value=c.code||'';
   $('#clStatus').value=c.status;
   $('#clHealth').value=c.health||'bom';
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
@@ -1398,6 +1401,8 @@ function renderTimeline(){
 function addTaskForClient(){const c=clientById(openClientId);closeClient();openEv(null,null,c?c.name:'');}
 function saveClient(){
   const c=clientById(openClientId);if(!c)return;
+  const newName=($('#clName').value||'').trim();if(newName)c.name=newName;
+  c.code=($('#clCode').value||'').trim();
   c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
   saveData();closeClient();render();toast('Cliente atualizado');
 }
@@ -1497,9 +1502,7 @@ function renderConfig(app){
   cfgDraft=state.users.map(u=>({...u,demands:[...(u.demands||[])]}));
   typesDraft=state.types.map(t=>({...t}));
   checkDraft=state.checklist.map(c=>({...c}));
-  driveDraft={root:state.driveRoot||'',tree:state.driveTree||DEFAULT_DRIVE_TREE,
-    shareEmails:(state.driveShareEmails&&state.driveShareEmails.length)?state.driveShareEmails.join(', '):'luan@floowdigital.com, yuri@floowdigital.com',
-    shareFolders:(state.driveShareFolders&&state.driveShareFolders.length)?state.driveShareFolders.join('\n'):'Criativos assertivos\nEstruturação estratégica'};
+  driveDraft={root:state.driveRoot||'',tree:state.driveTree||DEFAULT_DRIVE_TREE,shares:driveSharesForEdit()};
   app.insertAdjacentHTML('beforeend',`
     <div class="cfg-sec-h">👤 Usuários e responsabilidades</div>
     <div class="empty-hint" style="margin:-6px 0 12px">Marque de quais demandas cada pessoa é responsável.</div>
@@ -1590,8 +1593,7 @@ function saveConfig(){
   state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
   if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');
-    state.driveShareEmails=(driveDraft.shareEmails||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
-    state.driveShareFolders=(driveDraft.shareFolders||'').split('\n').map(s=>s.trim()).filter(Boolean);}
+    state.driveShares=(driveDraft.shares||[]).map(r=>({folder:(r.folder||'').trim(),emails:(r.emails||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean)})).filter(r=>r.folder&&r.emails.length);}
   state.clients.forEach(ensureChecklist);
   currentUser=state.users.find(u=>u.id===(currentUser&&currentUser.id))||currentUser;
   saveData();render();toast('Configurações salvas ✓');
@@ -1759,14 +1761,19 @@ function driveShareFolder(fileId,email){
   }).then(r=>r.json());
 }
 async function driveCreateTree(nodes,parentId,prefix){
-  const shareNames=state.driveShareFolders||[];
-  const shareEmails=state.driveShareEmails||[];
+  const shares=state.driveShares||[]; // regras: {folder, emails:[...]}
   for(const n of nodes){
     const f=await driveCreateFolder((prefix||'')+n.name,parentId);
     if(f&&f.id){
-      // subpastas de 1º nível (com prefixo) que estão na lista → compartilha com os e-mails
-      if(prefix&&shareNames.includes(n.name)){
-        for(const em of shareEmails){if(em&&em.trim())await driveShareFolder(f.id,em.trim());}
+      // subpastas de 1º nível (com prefixo): compartilha com os e-mails das regras que casam o nome
+      if(prefix){
+        const emails=[];shares.forEach(r=>{if(r&&r.folder===n.name)(r.emails||[]).forEach(e=>emails.push(e));});
+        for(const em of emails){if(em&&em.trim()){
+          try{const res=await driveShareFolder(f.id,em.trim());
+            if(res&&res.error)toast('⚠️ Não deu acesso a '+em+': '+(res.error.message||'erro'));
+            else toast('🤝 Acesso de '+n.name+' → '+em);
+          }catch(e){console.warn('share',e);}
+        }}
       }
       if(n.children&&n.children.length)await driveCreateTree(n.children,f.id,''); // níveis internos sem prefixo
     }
@@ -1801,10 +1808,31 @@ function renderDriveConfig(){
     <label class="f" style="margin-top:12px">Estrutura de subpastas <span style="text-transform:none;color:var(--txt-faint)">(2 espaços = subpasta dentro de subpasta)</span></label>
     <textarea class="t" id="driveTreeInput" style="min-height:210px;font-family:monospace;font-size:13px;white-space:pre" oninput="driveDraft.tree=this.value">${esc(driveDraft.tree)}</textarea>
     <div class="empty-hint" style="margin-top:6px">As subpastas de 1º nível recebem o prefixo <b>#código |</b> do cliente automaticamente. Os níveis mais internos ficam sem prefixo.</div>
-    <label class="f" style="margin-top:14px">🤝 Acesso automático — e-mails <span style="text-transform:none;color:var(--txt-faint)">(separados por vírgula; ganham acesso de Editor)</span></label>
-    <input class="t" value="${esc(driveDraft.shareEmails)}" placeholder="luan@floowdigital.com, yuri@floowdigital.com" oninput="driveDraft.shareEmails=this.value">
-    <label class="f" style="margin-top:10px">Pastas que esses e-mails recebem <span style="text-transform:none;color:var(--txt-faint)">(uma por linha, nome exato da subpasta)</span></label>
-    <textarea class="t" style="min-height:60px;font-family:monospace;font-size:13px;white-space:pre" oninput="driveDraft.shareFolders=this.value">${esc(driveDraft.shareFolders)}</textarea>`;
+    <label class="f" style="margin-top:14px">🤝 Compartilhamento automático <span style="text-transform:none;color:var(--txt-faint)">(ao criar o cliente, compartilha a pasta com os e-mails como Editor)</span></label>
+    <div id="driveShares"></div>
+    <button class="btn ghost cfg-add" onclick="addDriveShare()">+ Adicionar regra de compartilhamento</button>`;
+  renderDriveShares();
+}
+function renderDriveShares(){
+  const w=$('#driveShares');if(!w)return;
+  w.innerHTML=driveDraft.shares.length?driveDraft.shares.map((r,i)=>`
+    <div class="cfg-card" style="padding:11px;margin-bottom:8px">
+      <div class="cfg-link" style="gap:8px">
+        <span class="cfg-link-lbl">Pasta:</span>
+        <input class="t" style="flex:1" value="${esc(r.folder)}" placeholder="Nome exato da subpasta (ex.: Criativos assertivos)" oninput="driveDraft.shares[${i}].folder=this.value">
+        <button class="rm" onclick="driveDraft.shares.splice(${i},1);renderDriveShares()">×</button>
+      </div>
+      <div class="cfg-link" style="gap:8px;margin-top:7px">
+        <span class="cfg-link-lbl">E-mails:</span>
+        <input class="t" style="flex:1" value="${esc(r.emails)}" placeholder="email1@floowdigital.com, email2@…" oninput="driveDraft.shares[${i}].emails=this.value">
+      </div>
+    </div>`).join(''):'<div class="empty-hint">Nenhuma regra. Clique abaixo para compartilhar uma pasta com e-mails automaticamente.</div>';
+}
+function addDriveShare(){driveDraft.shares.push({folder:'',emails:''});renderDriveShares();}
+function driveSharesForEdit(){
+  if(state.driveShares&&state.driveShares.length)return state.driveShares.map(r=>({folder:r.folder||'',emails:(r.emails||[]).join(', ')}));
+  if(state.driveShareFolders&&state.driveShareFolders.length){const em=(state.driveShareEmails||[]).join(', ');return state.driveShareFolders.map(f=>({folder:f,emails:em}));} // migra formato antigo
+  return [{folder:'Criativos assertivos',emails:'luan@floowdigital.com, yuri@floowdigital.com'},{folder:'Estruturação estratégica',emails:'luan@floowdigital.com, yuri@floowdigital.com'}];
 }
 
 /* ---------- notificações: avisar 20 min antes de cada tarefa ---------- */
@@ -1839,9 +1867,28 @@ function fireNotif(title,ev,tagSuffix){
     icon:'/icon.svg',tag:ev.id+(tagSuffix||'')
   });}catch(e){}
 }
+function checkBillingNotifications(){
+  // avisa o admin 1 dia antes do dia de cobrança de cada cliente ativo
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  if(!currentUser||!isAdmin()||!state||!state.clients)return;
+  const now=new Date();const tmr=new Date(now);tmr.setDate(now.getDate()+1);
+  const tDay=tmr.getDate();const ym=tmr.getFullYear()+'-'+pad(tmr.getMonth()+1);
+  state.clients.forEach(c=>{
+    if(c.status!=='ativo')return;
+    const bd=parseInt(c.billingDay);if(!bd||bd!==tDay)return;
+    const key='floow-billing:'+ym+':'+c.id;
+    if(localStorage.getItem(key))return;localStorage.setItem(key,'1');
+    try{new Notification('💰 Cobrança amanhã',{
+      body:`${c.code?'#'+c.code+' ':''}${c.name}`+(c.contractValue?` · ${fmtBRL(c.contractValue)}`:'')+`\nVence no dia ${bd}`,
+      icon:'/icon.svg',tag:'billing-'+c.id
+    });}catch(e){}
+  });
+}
 function checkUpcomingNotifications(){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
-  if(!currentUser||!state||!state.events)return;
+  if(!currentUser||!state)return;
+  checkBillingNotifications();
+  if(!state.events)return;
   const now=new Date();const todayIso=iso(now);const nowMin=now.getHours()*60+now.getMinutes();
   state.events.forEach(ev=>{
     if(ev.done||ev.resp!==currentUser.id||ev.date!==todayIso)return;

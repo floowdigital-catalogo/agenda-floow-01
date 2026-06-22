@@ -369,6 +369,11 @@
   .fin-cell .fin-lbl{font-size:11px;color:var(--txt-faint);white-space:nowrap}
   .fin-cell input{width:100px}
   .exp-row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
+  .fin-sum{flex:none;font-size:12.5px;color:var(--txt-dim);min-width:150px;text-align:right}
+  .fin-resumo{display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--txt-dim)}
+  .fin-resumo b{color:var(--txt)}
+  .fin-resumo .fin-total b{color:var(--brand)}
+  @media(max-width:600px){.fin-sum{min-width:0;flex:1 1 100%;text-align:left}}
 
   /* grade do dia rolável (mostra as 24h sem esticar a página) */
   .daygrid-wrap{max-height:72vh;overflow:auto;border-radius:12px;border:1px solid var(--line-soft)}
@@ -608,6 +613,39 @@
   </div>
 </div>
 
+<!-- Billing modal (modelo Asaas) -->
+<div class="scrim" id="billScrim">
+  <div class="modal">
+    <h2 id="billTitle">Cobrança <span class="x" onclick="closeBilling()">&times;</span></h2>
+    <label class="f">Valor da cobrança (R$)</label>
+    <input class="t" id="bValue" type="number" min="0" step="50" placeholder="0,00">
+    <label class="f">Descrição <span style="text-transform:none;color:var(--txt-faint)">(opcional)</span></label>
+    <input class="t" id="bDesc" placeholder="Ex: Gestão de tráfego e criativos">
+    <label class="f">Tipo de cobrança</label>
+    <div class="seg" id="bType" style="width:fit-content">
+      <button type="button" onclick="setBillType('assinatura')">Assinatura</button>
+      <button type="button" onclick="setBillType('avista')">À vista / parcelado</button>
+    </div>
+    <div id="bAssinaturaFields">
+      <div class="two">
+        <div><label class="f">Frequência</label><select class="t" id="bFreq"><option value="mensal">Mensal</option><option value="quinzenal">Quinzenal</option><option value="semanal">Semanal</option><option value="anual">Anual</option></select></div>
+        <div><label class="f">Nº de cobranças <span style="text-transform:none;color:var(--txt-faint)">(vazio = sem fim)</span></label><input class="t" id="bCount" type="number" min="0" placeholder="∞"></div>
+      </div>
+    </div>
+    <label class="f">Vencimento da 1ª cobrança</label>
+    <input class="t" id="bFirst" type="date">
+    <label class="f">Forma de pagamento</label>
+    <div class="respgrid">
+      <button type="button" class="respbtn" id="bmBoleto" style="--c:var(--brand)" onclick="toggleBillMethod('boleto')"><span class="dot"></span>Boleto / Pix</button>
+      <button type="button" class="respbtn" id="bmCartao" style="--c:#5B8DEF" onclick="toggleBillMethod('cartao')"><span class="dot"></span>Cartão de crédito</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="closeBilling()">Cancelar</button>
+      <button class="btn primary" onclick="saveBilling()">Salvar cobrança</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -712,6 +750,7 @@ async function load(){
   if(!state.types)state.types=JSON.parse(JSON.stringify(DEF_TYPES));
   if(!state.checklist)state.checklist=JSON.parse(JSON.stringify(DEF_CHECKLIST));
   if(!state.expenses)state.expenses=[];
+  if(!state.expensesSeeded){if(!state.expenses.length)state.expenses=DEFAULT_EXPENSES();state.expensesSeeded=true;}
   if(!state.tombstones)state.tombstones={events:{},clients:{}};
   if(!state.tombstones.events)state.tombstones.events={};
   if(!state.tombstones.clients)state.tombstones.clients={};
@@ -959,38 +998,113 @@ function renderDash(app){
 }
 
 /* ---------- financeiro (admin) ---------- */
-function setClientBilling(cid,v){const c=clientById(cid);if(!c)return;c.billingDay=parseInt(v)||0;touch(c);saveData();renderFinanceInner();}
-function setClientContract(cid,v){const c=clientById(cid);if(!c)return;c.contractValue=Number(v)||0;touch(c);saveData();renderFinanceInner();}
-function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',value:0});saveData();renderFinanceInner();}
+function DEFAULT_EXPENSES(){const e=(desc,category,type,value,obs)=>({id:uid(),desc,category,type,value,obs:obs||''});return [
+  e('Colaborador 1 | Gestor criativo','Equipe','Variável',3000,'PJ'),
+  e('Aluguel / escritório','Infraestrutura','Fixa',1000),
+  e('Internet + telefonia','Infraestrutura','Fixa',100),
+  e('Energia + água','Infraestrutura','Fixa',200),
+  e('Contabilidade','Administrativo','Fixa',400),
+  e('Ferramentas de gestão (ClickUp, Notion)','Software','Fixa',200,'3 usuários no ClickUp'),
+  e('Ferramentas de criação (Capcut, Canva)','Software','Fixa',100,'Capcut Pro e Canva Pro'),
+  e('CRM / automação','Software','Fixa',100,'Kommo CRM'),
+  e('Hospedagem + domínios','Software','Fixa',50,'Hospedainfo + 3 domínios'),
+  e('Claude code','Software','Fixa',530,'Plano MAX'),
+  e('Google Workspace','Software','Fixa',200,'5 usuários'),
+  e('Marketing próprio','Marketing','Fixa',2000,'Captação de novos clientes'),
+  e('Gasolina','Administrativo','Fixa',200,'Deslocamento para captações'),
+  e('Depreciação equipamentos e mobiliário','Administrativo','Fixa',356,'Investimentos em materiais'),
+  e('Material de limpeza','Administrativo','Fixa',30),
+  e('Café e copa','Administrativo','Fixa',50),
+  e('Material de escritório','Administrativo','Fixa',100),
+  e('Pró-labore Sócio 1','Pró-labore','Pró-labore',3000,'Fixo, mesmo nos meses ruins'),
+  e('Pró-labore Sócio 2','Pró-labore','Pró-labore',3000,'Fixo, mesmo nos meses ruins'),
+];}
+const FREQ_LABEL={mensal:'Mensal',quinzenal:'Quinzenal',semanal:'Semanal',anual:'Anual'};
+function billingMonthly(b){if(!b||!b.value)return 0;const v=Number(b.value)||0;if(b.type==='avista')return 0;
+  switch(b.frequency){case 'semanal':return v*4.33;case 'quinzenal':return v*2;case 'anual':return v/12;default:return v;}}
+function clientMonthly(c){if(c.billing&&c.billing.value)return billingMonthly(c.billing);return Number(c.contractValue)||0;}
+function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',category:'',type:'Fixa',value:0,obs:''});saveData();renderFinanceInner();}
 function setExpenseField(id,field,v){const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;e[field]=(field==='value')?(Number(v)||0):v;saveData();renderFinanceInner();}
 function removeExpense(id){state.expenses=(state.expenses||[]).filter(x=>x.id!==id);saveData();renderFinanceInner();}
+/* --- cobrança (modelo Asaas), guardada no app --- */
+let billClientId=null, billType='assinatura', billMethods=[];
+function openBilling(cid){
+  const c=clientById(cid);if(!c)return;billClientId=cid;const b=c.billing||{};
+  $('#billTitle').childNodes[0].nodeValue=(c.code?'#'+c.code+' · ':'')+c.name+' ';
+  $('#bValue').value=b.value||c.contractValue||'';
+  $('#bDesc').value=b.description||'';
+  billType=b.type||'assinatura';
+  $('#bFreq').value=b.frequency||'mensal';
+  $('#bCount').value=b.count||'';
+  $('#bFirst').value=b.firstDue||'';
+  billMethods=(b.methods&&b.methods.slice())||['boleto'];
+  renderBillType();renderBillMethods();
+  $('#billScrim').classList.add('on');
+}
+function closeBilling(){$('#billScrim').classList.remove('on');billClientId=null;}
+function setBillType(t){billType=t;renderBillType();}
+function renderBillType(){const seg=$('#bType');if(!seg)return;seg.children[0].classList.toggle('on',billType==='assinatura');seg.children[1].classList.toggle('on',billType==='avista');$('#bAssinaturaFields').style.display=billType==='assinatura'?'':'none';}
+function toggleBillMethod(m){const i=billMethods.indexOf(m);i>=0?billMethods.splice(i,1):billMethods.push(m);renderBillMethods();}
+function renderBillMethods(){$('#bmBoleto').classList.toggle('on',billMethods.includes('boleto'));$('#bmCartao').classList.toggle('on',billMethods.includes('cartao'));}
+function saveBilling(){
+  const c=clientById(billClientId);if(!c)return;
+  const value=Number($('#bValue').value)||0;const firstDue=$('#bFirst').value||'';
+  c.billing={value,description:($('#bDesc').value||'').trim(),type:billType,frequency:$('#bFreq').value,count:parseInt($('#bCount').value)||0,firstDue,methods:billMethods.slice()};
+  c.contractValue=value; // compatibilidade com faturamento/relatórios
+  if(firstDue)c.billingDay=parseISO(firstDue).getDate(); // p/ a notificação de cobrança
+  touch(c);saveData();closeBilling();renderFinanceInner();toast('Cobrança salva ✓');
+}
 function renderFinance(app){app.insertAdjacentHTML('beforeend','<div id="financeWrap"></div>');renderFinanceInner();}
 function renderFinanceInner(){
   const wrap=$('#financeWrap');if(!wrap)return;
   const cs=state.clients.slice().sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
-  const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+(Number(c.contractValue)||0),0);
-  const desp=(state.expenses||[]).reduce((s,e)=>s+(Number(e.value)||0),0);
-  const lucro=mrr-desp;
-  const rows=cs.map(c=>`
-    <div class="fin-row">
+  const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+clientMonthly(c),0);
+  const exps=state.expenses||[];
+  const sumType=t=>exps.filter(e=>(e.type||'Fixa')===t).reduce((s,e)=>s+(Number(e.value)||0),0);
+  const tVar=sumType('Variável'),tFix=sumType('Fixa'),tPro=sumType('Pró-labore');
+  const despTotal=tVar+tFix+tPro;const lucro=mrr-despTotal;
+  const rows=cs.map(c=>{
+    const b=c.billing;const mv=clientMonthly(c);
+    const extra=b?(b.type==='avista'?' · à vista':(b.frequency&&b.frequency!=='mensal'?' · '+(FREQ_LABEL[b.frequency]||b.frequency):''))+(b.firstDue?' · vence dia '+parseISO(b.firstDue).getDate():''):(c.billingDay?' · dia '+c.billingDay:'');
+    const sum=mv?`${fmtBRL(mv)}/mês${extra}`:'<span style="color:var(--txt-faint)">sem cobrança</span>';
+    return `<div class="fin-row">
       <span class="fin-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
-      <span class="fin-cell"><span class="fin-lbl">Cobrança dia</span><input class="t" type="number" min="1" max="31" value="${c.billingDay||''}" placeholder="—" onchange="setClientBilling('${c.id}',this.value)"></span>
-      <span class="fin-cell"><span class="fin-lbl">Contrato R$</span><input class="t" type="number" min="0" step="50" value="${c.contractValue||''}" placeholder="0" onchange="setClientContract('${c.id}',this.value)"></span>
-    </div>`).join('');
-  const expRows=(state.expenses||[]).length?(state.expenses||[]).map(e=>`
-    <div class="exp-row">
-      <input class="t" value="${esc(e.desc)}" placeholder="Descrição (ex.: Tráfego, ferramentas, salários…)" onchange="setExpenseField('${e.id}','desc',this.value)" style="flex:1">
-      <input class="t" type="number" min="0" step="10" value="${e.value||''}" placeholder="0" onchange="setExpenseField('${e.id}','value',this.value)" style="width:130px">
-      <button class="rm" onclick="removeExpense('${e.id}')">×</button>
-    </div>`).join(''):'<div class="empty-hint">Nenhuma despesa cadastrada.</div>';
+      <span class="fin-sum">${sum}</span>
+      <button class="btn" onclick="openBilling('${c.id}')">Cobrança</button>
+    </div>`;}).join('');
+  const expRow=e=>`
+    <div class="cfg-card" style="padding:10px;margin-bottom:7px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="t" value="${esc(e.desc)}" placeholder="Descrição" onchange="setExpenseField('${e.id}','desc',this.value)" style="flex:1">
+        <input class="t" type="number" min="0" step="10" value="${e.value||''}" placeholder="0" onchange="setExpenseField('${e.id}','value',this.value)" style="width:120px">
+        <button class="rm" onclick="removeExpense('${e.id}')">×</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:7px;flex-wrap:wrap">
+        <input class="t" value="${esc(e.category||'')}" placeholder="Categoria" onchange="setExpenseField('${e.id}','category',this.value)" style="flex:1;min-width:110px">
+        <select class="t" onchange="setExpenseField('${e.id}','type',this.value)" style="width:130px">
+          ${['Variável','Fixa','Pró-labore'].map(t=>`<option value="${t}" ${((e.type||'Fixa')===t)?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <input class="t" value="${esc(e.obs||'')}" placeholder="Observações" onchange="setExpenseField('${e.id}','obs',this.value)" style="flex:2;min-width:130px">
+      </div>
+    </div>`;
+  const expRows=exps.length?exps.map(expRow).join(''):'<div class="empty-hint">Nenhuma despesa cadastrada.</div>';
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:15px">
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
-      <div class="metric"><div class="mv">${fmtBRL(desp)}</div><div class="ml">Despesas mensais</div></div>
+      <div class="metric"><div class="mv">${fmtBRL(despTotal)}</div><div class="ml">Despesas mensais</div></div>
       <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
     </div>
-    <div class="panel"><h3>Contratos por cliente <span class="h3-side">dia de cobrança · valor mensal</span></h3>${rows||'<div class="empty-hint">Nenhum cliente.</div>'}</div>
-    <div class="panel"><h3>Despesas mensais <span class="h3-side">${fmtBRL(desp)}</span></h3>${expRows}<button class="btn ghost cfg-add" onclick="addExpense()" style="margin-top:10px">+ Adicionar despesa</button></div>`;
+    <div class="panel"><h3>Cobranças por cliente <span class="h3-side">clique em "Cobrança" para configurar</span></h3>${rows||'<div class="empty-hint">Nenhum cliente.</div>'}</div>
+    <div class="panel"><h3>Despesas mensais <span class="h3-side">total ${fmtBRL(despTotal)}</span></h3>
+      ${expRows}
+      <button class="btn ghost cfg-add" onclick="addExpense()" style="margin-top:10px">+ Adicionar despesa</button>
+      <div class="fin-resumo">
+        <span>Variáveis <b>${fmtBRL(tVar)}</b></span>
+        <span>Fixas <b>${fmtBRL(tFix)}</b></span>
+        <span>Pró-labore <b>${fmtBRL(tPro)}</b></span>
+        <span class="fin-total">Total geral <b>${fmtBRL(despTotal)}</b></span>
+      </div>
+    </div>`;
 }
 
 /* ---------- horas trabalhadas (admin) ---------- */

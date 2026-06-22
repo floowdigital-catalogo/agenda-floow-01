@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f5b400">
-<title>FLOOW Digital — Agenda de Entregas</title>
+<title>FLOOW Gestão</title>
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
 <link rel="apple-touch-icon" href="/icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -493,13 +493,13 @@
     </div>
     <div>
       <div class="name"><b>FLOOW</b> digital</div>
-      <div class="sub">Agenda de entregas · equipe</div>
+      <div class="sub">Gestão · equipe</div>
     </div>
   </div>
   <div class="user-chip" id="userChip"></div>
 </header>
 
-<div id="app"><div class="loading"><div class="spin"></div>Carregando a agenda da equipe…</div></div>
+<div id="app"><div class="loading"><div class="spin"></div>Carregando a gestão da equipe…</div></div>
 
 <!-- Event modal -->
 <div class="scrim" id="evScrim">
@@ -928,7 +928,7 @@ function renderLogin(){
     <div class="login">
       <div class="login-card">
         <div class="mark big"><svg viewBox="0 0 80 60" fill="none"><path d="M40 30 C40 14 20 14 20 30 C20 46 40 46 40 30 C40 14 60 14 60 30 C60 46 40 46 40 30 Z" stroke="#f5b400" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-        <h2>Entrar na agenda</h2>
+        <h2>Entrar na gestão</h2>
         <p class="login-sub">FLOOW Digital · acesso da equipe</p>
         <label class="f">E-mail</label>
         <input class="t" id="liEmail" type="email" placeholder="voce@floow.com" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1063,6 +1063,12 @@ function renderFinanceInner(){
   const sumType=t=>exps.filter(e=>(e.type||'Fixa')===t).reduce((s,e)=>s+(Number(e.value)||0),0);
   const tVar=sumType('Variável'),tFix=sumType('Fixa'),tPro=sumType('Pró-labore');
   const despTotal=tVar+tFix+tPro;const lucro=mrr-despTotal;
+  const pagantes=cs.filter(c=>c.status==='ativo'&&clientMonthly(c)>0).length;
+  const ticket=pagantes?mrr/pagantes:0;const margem=mrr>0?lucro/mrr*100:0;
+  const byCat={};exps.forEach(e=>{const k=(e.category||'Outros').trim()||'Outros';byCat[k]=(byCat[k]||0)+(Number(e.value)||0);});
+  const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);const maxCat=Math.max(1,...cats.map(c=>c[1]));
+  const catRows=cats.map(([k,v])=>`<div class="loadrow"><span class="ln">${esc(k)}</span><div class="lbar"><span style="width:${v/maxCat*100}%;background:var(--brand)"></span></div><span class="ln-n">${fmtBRL(v)}</span></div>`).join('');
+  const seg=(v,color,title)=>v>0?`<span style="width:${despTotal?v/despTotal*100:0}%;background:${color}" title="${title}"></span>`:'';
   const rows=cs.map(c=>{
     const b=c.billing;const mv=clientMonthly(c);
     const extra=b?(b.type==='avista'?' · à vista':(b.frequency&&b.frequency!=='mensal'?' · '+(FREQ_LABEL[b.frequency]||b.frequency):''))+(b.firstDue?' · vence dia '+parseISO(b.firstDue).getDate():''):(c.billingDay?' · dia '+c.billingDay:'');
@@ -1093,6 +1099,23 @@ function renderFinanceInner(){
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
       <div class="metric"><div class="mv">${fmtBRL(despTotal)}</div><div class="ml">Despesas mensais</div></div>
       <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
+      <div class="metric ${margem<0?'alert':''}"><div class="mv">${margem.toFixed(0)}%</div><div class="ml">Margem de lucro</div></div>
+    </div>
+    <div class="panel">
+      <h3>📊 Painel financeiro <span class="h3-side">${pagantes} pagante(s) · ticket médio ${fmtBRL(ticket)}</span></h3>
+      <div class="day-summary" style="margin-bottom:14px">
+        <div><b>${fmtBRL(despTotal)}</b> · ponto de equilíbrio (faturamento para empatar)</div>
+        <div>${mrr>=despTotal?'<b style="color:var(--ok)">Acima do equilíbrio ✓</b>':`Faltam <b style="color:var(--danger)">${fmtBRL(despTotal-mrr)}</b> de faturamento`}</div>
+      </div>
+      <div class="cfg-dem-lbl">Composição das despesas</div>
+      <div class="health-bar">${seg(tVar,'#FF7A59','Variáveis')}${seg(tFix,'#5B8DEF','Fixas')}${seg(tPro,'#B57BEE','Pró-labore')||'<span style="width:100%;background:var(--surface-2)"></span>'}</div>
+      <div class="hleg">
+        <span class="it"><span class="dot" style="background:#FF7A59"></span>Variáveis <b>${fmtBRL(tVar)}</b></span>
+        <span class="it"><span class="dot" style="background:#5B8DEF"></span>Fixas <b>${fmtBRL(tFix)}</b></span>
+        <span class="it"><span class="dot" style="background:#B57BEE"></span>Pró-labore <b>${fmtBRL(tPro)}</b></span>
+      </div>
+      <div class="cfg-dem-lbl" style="margin-top:16px">Despesas por categoria</div>
+      ${catRows||'<div class="empty-hint">Sem despesas.</div>'}
     </div>
     <div class="panel"><h3>Cobranças por cliente <span class="h3-side">clique em "Cobrança" para configurar</span></h3>${rows||'<div class="empty-hint">Nenhum cliente.</div>'}</div>
     <div class="panel"><h3>Despesas mensais <span class="h3-side">total ${fmtBRL(despTotal)}</span></h3>

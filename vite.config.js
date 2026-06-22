@@ -8,9 +8,9 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['icon.svg', 'favicon.ico'],
       manifest: {
-        name: 'FLOOW Digital — Agenda de Entregas',
-        short_name: 'Agenda FLOOW',
-        description: 'Agenda de entregas da equipe FLOOW Digital',
+        name: 'FLOOW Gestão',
+        short_name: 'FLOOW Gestão',
+        description: 'Sistema de gestão da equipe FLOOW Digital',
         lang: 'pt-BR',
         theme_color: '#f5b400',
         background_color: '#0a0a0b',

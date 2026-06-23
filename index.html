@@ -388,6 +388,11 @@
   .opt-btn{border:1px solid var(--line);background:var(--surface);color:var(--txt-dim);border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700}
   .opt-btn.on.yes{background:color-mix(in srgb,var(--ok) 20%,transparent);border-color:var(--ok);color:var(--ok)}
   .opt-btn.on.no{background:color-mix(in srgb,var(--brand) 20%,transparent);border-color:var(--brand);color:var(--brand)}
+  .opt-status{margin-top:9px;font-size:12.5px;color:var(--txt-dim);background:var(--surface);border:1px solid var(--line-soft);border-radius:8px;padding:7px 10px}
+  .opt-status b{color:var(--txt)}
+  .opt-chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px}
+  .opt-chip.red{background:color-mix(in srgb,var(--danger) 20%,transparent);color:var(--danger)}
+  .opt-chip.yellow{background:color-mix(in srgb,var(--brand) 22%,transparent);color:var(--brand)}
   .fin-sum{flex:none;font-size:12.5px;color:var(--txt-dim);min-width:150px;text-align:right}
   .fin-resumo{display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--txt-dim)}
   .fin-resumo b{color:var(--txt)}
@@ -1166,37 +1171,40 @@ function renderOptInner(){
   const wrap=$('#optWrap');if(!wrap)return;
   const cs=state.clients.slice().filter(c=>c.status!=='arquivado').sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   const ativos=state.clients.filter(c=>c.status==='ativo').length;
-  const totalDiario=state.clients.filter(c=>c.status==='ativo').reduce((s,c)=>s+(Number(c.dailyValue)||0),0);
   const vencidas=cs.filter(c=>optAlertLevel(c)==='red').length, proximas=cs.filter(c=>optAlertLevel(c)==='yellow').length;
   const fmtD=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
   const cards=cs.map(c=>{
     const hl=healthOf(c.health);const al=optAlertLevel(c);const nx=nextOptDate(c);
-    return `<div class="opt-card ${al?('opt-'+al):''}">
+    let status;
+    if(c.weekSold===undefined||c.weekSold===null)status='<span style="color:var(--txt-faint)">Ainda não marcado essa semana</span>';
+    else if(c.weekSold===true)status=c.prevWeekSold===true?'🟢 Vendeu 2 semanas seguidas → <b>Excelente</b>':'🔵 Vendeu essa semana → <b>Bom</b>';
+    else status=c.prevWeekSold===false?'🔴 2 semanas sem vender → <b>Ruim</b>':'🟠 Não vendeu essa semana → <b>Observação</b>';
+    const chip=al==='red'?'<span class="opt-chip red">vencida</span>':al==='yellow'?'<span class="opt-chip yellow">em breve</span>':'';
+    return `<div class="opt-card" style="border-top:3px solid ${hl.color}">
       <div class="opt-top">
         <span class="opt-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
         <span class="hbadge" style="--h:${hl.color}">${hl.label}</span>
       </div>
       <div class="opt-grid">
         <label class="opt-f"><span>Última otimização</span><input class="t" type="date" value="${c.optDate||''}" onchange="setOptDate('${c.id}',this.value)"></label>
-        <label class="opt-f"><span>Próxima otimização</span><div class="opt-next ${al}">${nx?fmtD(nx):'—'}${al==='red'?' 🔴':al==='yellow'?' 🟡':''}</div></label>
-        <label class="opt-f" style="grid-column:1/-1"><span>Valor diário (R$)</span><input class="t" type="number" min="0" step="5" value="${c.dailyValue||''}" placeholder="0" onchange="setOptDaily('${c.id}',this.value)"></label>
+        <label class="opt-f"><span>Próxima otimização</span><div class="opt-next ${al}">${nx?fmtD(nx):'—'} ${chip}</div></label>
       </div>
       <div class="opt-sales">
         <span class="opt-lbl">Vendeu essa semana?</span>
         <button class="opt-btn ${c.weekSold===true?'on yes':''}" onclick="markSold('${c.id}',true)">Sim</button>
         <button class="opt-btn ${c.weekSold===false?'on no':''}" onclick="markSold('${c.id}',false)">Não</button>
       </div>
+      <div class="opt-status">${status}</div>
       <label class="opt-f" style="margin-top:10px"><span>O que foi feito / observações</span>
         <textarea class="t" placeholder="Descreva o que foi feito na otimização ou alguma observação…" onchange="setOptNotes('${c.id}',this.value)" style="min-height:56px;font-size:13px">${esc(c.optNotes||'')}</textarea></label>
     </div>`;}).join('');
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:14px">
-      <div class="metric"><div class="mv">${fmtBRL(totalDiario)}</div><div class="ml">Total diário investido (ativos)</div></div>
       <div class="metric"><div class="mv">${ativos}</div><div class="ml">Clientes ativos</div></div>
       <div class="metric ${vencidas?'alert':''}"><div class="mv">${vencidas}</div><div class="ml">🔴 Otimizações vencidas</div></div>
       <div class="metric"><div class="mv">${proximas}</div><div class="ml">🟡 Próximas (1-2 dias)</div></div>
     </div>
-    <div class="empty-hint" style="margin:-4px 0 12px">Marque "Vendeu essa semana?" e o desempenho se ajusta sozinho: vendeu → <b>Bom</b> · 2 semanas seguidas → <b>Excelente</b> · não vendeu → <b>Observação</b> · 2 semanas sem vender → <b>Ruim</b>. A próxima otimização é 7 dias após a última.</div>
+    <div class="empty-hint" style="margin:-4px 0 12px">Ao fechar a semana (ex.: toda <b>sexta</b>), marque <b>"Vendeu essa semana?"</b>. O desempenho se ajusta sozinho: vendeu → <b>Bom</b> · vendeu 2 semanas seguidas → <b>Excelente</b> · não vendeu → <b>Observação</b> · marcou "Não" 2 semanas seguidas → <b>Ruim</b>. A próxima otimização é 7 dias após a última.</div>
     <div class="opt-grid-wrap">${cards||'<div class="empty-state">Nenhum cliente.</div>'}</div>`;
 }
 

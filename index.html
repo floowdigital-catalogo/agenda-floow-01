@@ -1891,7 +1891,8 @@ function shouldSyncGoogle(ev){
 function gcalPayload(ev){
   const body={
     summary:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`,
-    description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`
+    description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`,
+    colorId:'3' // roxo ("Uva") no Google Agenda
   };
   if(ev.time){
     const end=ev.end||addMinHHMM(ev.time,60);

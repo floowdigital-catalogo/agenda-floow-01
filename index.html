@@ -1749,6 +1749,7 @@ function renderCfgList(){
         <input type="color" class="tcolor" value="${u.color||'#888888'}" oninput="cfgDraft[${i}].color=this.value">
         <input class="t uname" value="${esc(u.name)}" placeholder="Nome" oninput="cfgDraft[${i}].name=this.value">
         <label class="uadmin"><input type="checkbox" ${u.isAdmin?'checked':''} onchange="cfgDraft[${i}].isAdmin=this.checked;renderCfgList()"> Admin</label>
+        ${googleClientId()?`<label class="uadmin" title="Criar as tarefas desta pessoa direto na Agenda do Google dela"><input type="checkbox" ${u.googleSync?'checked':''} onchange="cfgDraft[${i}].googleSync=this.checked"> 📅 Agenda</label>`:''}
         <button class="rm" onclick="cfgDraft.splice(${i},1);renderCfgList()">×</button>
       </div>
       <div class="cfg-grid2">
@@ -1890,7 +1891,7 @@ function shouldSyncGoogle(ev){
 function gcalPayload(ev){
   const body={
     summary:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`,
-    description:`Agenda FLOOW Digital\nResponsável: ${respName(ev.resp)}`
+    description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`
   };
   if(ev.time){
     const end=ev.end||addMinHHMM(ev.time,60);
@@ -1899,28 +1900,35 @@ function gcalPayload(ev){
   }else{
     body.start={date:ev.date};body.end={date:nextDay(ev.date)};
   }
-  const u=userById(ev.resp);
-  if(u&&u.email&&/@/.test(u.email))body.attendees=[{email:u.email}];
-  return body;
+  return body; // sem convidados: vai DIRETO no calendário do responsável
 }
 function syncEventToGoogle(ev){
   if(!shouldSyncGoogle(ev))return;
+  const u=userById(ev.resp);
+  if(!u||!u.email||!/@/.test(u.email))return; // o e-mail do responsável É o calendário de destino
+  const cal=u.email;
   gEnsureToken(()=>{
+    // se o responsável mudou, apaga do calendário antigo antes de recriar
+    if(ev.gcalId&&ev.gcalCal&&ev.gcalCal!==cal){
+      fetch('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(ev.gcalCal)+'/events/'+encodeURIComponent(ev.gcalId),{method:'DELETE',headers:{'Authorization':'Bearer '+gAccessToken}}).catch(()=>{});
+      ev.gcalId=null;
+    }
     const isUpdate=!!ev.gcalId;
-    const base='https://www.googleapis.com/calendar/v3/calendars/primary/events';
-    const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'')+'?sendUpdates=all';
+    const base='https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(cal)+'/events';
+    const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'');
     fetch(url,{method:isUpdate?'PATCH':'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(gcalPayload(ev))})
       .then(r=>r.json()).then(data=>{
-        if(data&&data.error){console.warn('gcal',data.error);toast('Falha ao criar no Google');return;}
-        if(data&&data.id&&!ev.gcalId){ev.gcalId=data.id;saveData();}
-        toast('📅 Criado no Google Agenda do '+respName(ev.resp));
-      }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar no Google');});
+        if(data&&data.error){console.warn('gcal',data.error);toast('⚠️ Agenda ('+cal+'): '+(data.error.message||'falha'));return;}
+        if(data&&data.id){ev.gcalId=data.id;ev.gcalCal=cal;saveData();}
+        toast('📅 Na agenda de '+respName(ev.resp));
+      }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar na agenda');});
   });
 }
 function deleteGoogleEvent(ev){
   if(!ev||!ev.gcalId||!gConnectedFlag())return;
+  const cal=ev.gcalCal||'primary';
   gEnsureToken(()=>{
-    fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+encodeURIComponent(ev.gcalId)+'?sendUpdates=all',{method:'DELETE',headers:{'Authorization':'Bearer '+gAccessToken}}).catch(()=>{});
+    fetch('https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(cal)+'/events/'+encodeURIComponent(ev.gcalId),{method:'DELETE',headers:{'Authorization':'Bearer '+gAccessToken}}).catch(()=>{});
   });
 }
 function renderGcalConfig(){

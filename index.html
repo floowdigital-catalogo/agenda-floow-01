@@ -809,8 +809,14 @@ function mergeStates(remote,local){
   if(!local)return remote;
   const rt=remote.tombstones||{}, lt=local.tombstones||{};
   const tomb={events:mergeTomb(rt.events,lt.events),clients:mergeTomb(rt.clients,lt.clients)};
+  // CONFIG (usuários/demandas/checklist/drive) = a versão MAIS RECENTE pelo carimbo cfgUpdatedAt.
+  // Assim a cópia antiga de outro usuário não apaga mudanças do Config (ex.: ✅ Agenda do responsável).
+  const cfgSrc=((local.cfgUpdatedAt||0)>=(remote.cfgUpdatedAt||0))?local:remote;
   return {
-    ...remote, ...local, // users/types/checklist = versão de quem está salvando (alterações deliberadas)
+    ...remote, ...local,
+    users:cfgSrc.users, types:cfgSrc.types, checklist:cfgSrc.checklist,
+    driveRoot:cfgSrc.driveRoot, driveTree:cfgSrc.driveTree, driveShares:cfgSrc.driveShares, driveTemplates:cfgSrc.driveTemplates,
+    cfgUpdatedAt:Math.max(local.cfgUpdatedAt||0,remote.cfgUpdatedAt||0),
     events:mergeArrById(remote.events,local.events,tomb.events),
     clients:mergeArrById(remote.clients,local.clients,tomb.clients),
     tombstones:tomb,
@@ -1812,6 +1818,7 @@ function saveConfig(){
     state.driveShares=(driveDraft.shares||[]).map(r=>({folder:(r.folder||'').trim(),emails:(r.emails||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean)})).filter(r=>r.folder&&r.emails.length);
     state.driveTemplates=(driveDraft.templates||[]).map(t=>({fileId:(t.fileId||'').trim(),subfolder:(t.subfolder||'').trim(),name:(t.name||'').trim()})).filter(t=>t.fileId&&t.subfolder);}
   state.clients.forEach(ensureChecklist);
+  state.cfgUpdatedAt=Date.now(); // carimbo: marca esta config como a mais recente (vence na mesclagem)
   currentUser=state.users.find(u=>u.id===(currentUser&&currentUser.id))||currentUser;
   saveData();render();toast('Configurações salvas ✓');
 }

@@ -1527,13 +1527,14 @@ function renderClients(app){
       <option value="all">Todos (${state.clients.length})</option><option value="ativo">Ativos</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados</option>
     </select>
     <div class="spacer"></div>
-    <button class="btn" onclick="openBulk()">📥 Importar lista</button>
-    <button class="btn primary" onclick="openAdd()">+ Novo cliente</button>`;
+    ${isAdmin()?`<button class="btn" onclick="openBulk()">📥 Importar lista</button>
+    <button class="btn primary" onclick="openAdd()">+ Novo cliente</button>`:''}`;
   app.appendChild(bar);
   const wrap=document.createElement('div');wrap.id='clientGridWrap';app.appendChild(wrap);
   renderClientGrid();
 }
 function addQuick(){
+  if(!isAdmin())return; // só admin cria cliente
   const inp=$('#qaInput');const name=(inp.value||'').trim();if(!name){inp.focus();return;}
   const id=findOrCreateClient(name);saveData();const _c=clientById(id);if(_c)createClientDriveFolders(_c);inp.value='';renderClientGrid();inp.focus();
   toast('Cliente adicionado ✓');
@@ -1572,6 +1573,7 @@ function openAdd(){
 }
 function closeAdd(){$('#addScrim').classList.remove('on');}
 function saveAdd(){
+  if(!isAdmin())return; // só admin cria cliente
   const name=$('#aName').value.trim();if(!name){toast('Digite o nome');return;}
   const ex=state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase());
   if(ex){toast('Cliente já existe');closeAdd();openClient(ex.id);return;}
@@ -1589,6 +1591,7 @@ function updateBulkPreview(){
   $('#bulkPreview').textContent=lines.length?`${novos} novo(s) cliente(s)${dup?` · ${dup} já existente(s) serão ignorados`:''}`:'Cole um cliente por linha.';
 }
 function doBulk(){
+  if(!isAdmin())return; // só admin importa clientes
   const lines=$('#bulkText').value.split('\n').map(parseClientLine).filter(Boolean);
   if(!lines.length){toast('Nada para importar');return;}
   const names=new Set(state.clients.map(c=>c.name.toLowerCase()));let added=0;
@@ -1602,7 +1605,7 @@ function doBulk(){
 function openClient(id){
   openClientId=id;const c=clientById(id);if(!c)return;
   delArmed=false;clearTimeout(delTimer);
-  const db=document.querySelector('#clientScrim .btn.del');if(db){db.textContent='Excluir cliente';db.classList.remove('armed');}
+  const db=document.querySelector('#clientScrim .btn.del');if(db){db.textContent='Excluir cliente';db.classList.remove('armed');db.style.display=isAdmin()?'':'none';}
   clientDraftStatus=c.status;clientDraftOwner=c.owner;
   $('#clTitle').childNodes[0].nodeValue=(c.code?'#'+c.code+' · ':'')+c.name+' ';
   $('#clName').value=c.name||'';
@@ -1638,6 +1641,7 @@ function openClientCardDrive(cid){const c=clientById(cid);if(c&&c.driveUrl)windo
 }
 let delArmed=false, delTimer=null;
 function deleteClient(btn){
+  if(!isAdmin())return; // só admin exclui cliente
   const c=clientById(openClientId);if(!c)return;
   if(!delArmed){
     delArmed=true;

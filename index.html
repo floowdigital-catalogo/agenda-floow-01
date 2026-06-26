@@ -361,6 +361,14 @@
   .dl-actions{display:flex;gap:6px;flex:none}
   .dl-item.na .dl-label{opacity:.75;text-decoration:line-through;color:#B57BEE}
   .dl-btn.na-on{background:color-mix(in srgb,#B57BEE 22%,transparent);border-color:color-mix(in srgb,#B57BEE 55%,transparent);color:#cdaef7}
+  /* resultados (painel geral) */
+  .res-table{width:100%;border-collapse:collapse;font-size:13px}
+  .res-table th,.res-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  .res-table th{color:var(--txt-faint);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .res-table tbody tr:hover{background:var(--surface-2)}
+  .res-cli{font-weight:600}
+  .res-note{width:150px;font-size:12px;padding:5px 7px}
+  .res-man{font-size:11px;cursor:default}
   /* financeiro */
   .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
   .fin-row:last-child{border-bottom:none}
@@ -926,7 +934,7 @@ function render(){
   const nav=document.createElement('div');nav.className='tabs';
   if(canManage()){
     const full=isAdmin(); // só admin vê Horas, Financeiro e Config
-    const allowed=full?['dash','cal','tasks','deliver','otim','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','clients'];
+    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','clients'];
     if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
     nav.innerHTML=`
       <button class="tab ${tab==='dash'?'on':''}" onclick="setTab('dash')">📊 Painel</button>
@@ -934,6 +942,7 @@ function render(){
       <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
       <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
       <button class="tab ${tab==='otim'?'on':''}" onclick="setTab('otim')">📈 Otimizações</button>
+      <button class="tab ${tab==='resultados'?'on':''}" onclick="setTab('resultados')">📊 Resultados</button>
       ${full?`<button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>`:''}
       ${full?`<button class="tab sep ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>`:''}
       <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
@@ -944,6 +953,7 @@ function render(){
     else if(tab==='tasks')renderTasks(app);
     else if(tab==='deliver')renderDeliver(app);
     else if(tab==='otim')renderOpt(app);
+    else if(tab==='resultados')renderResultados(app);
     else if(tab==='horas')renderHours(app);
     else if(tab==='financeiro')renderFinance(app);
     else if(tab==='config')renderConfig(app);
@@ -1862,6 +1872,120 @@ function renderCopy(){$('#copyBox').textContent=buildCopyText();}
 function doCopy(){const txt=buildCopyText();const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copiado! Cole no WhatsApp 📋');}catch(e){toast('Selecione e copie');}document.body.removeChild(ta);}
 
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
+
+/* ---------- 📊 Resultados (Painel Geral) — números vêm do robô do Meta na chave 'floow-painel' ---------- */
+const RESULT_STATUS=[
+  {id:'ruim',label:'Ruim',em:'🔴',color:'#f2675c',ord:0},
+  {id:'observacao',label:'Observação',em:'🟡',color:'#f5b400',ord:1},
+  {id:'semvendas',label:'Sem vendas lançadas',em:'⚪',color:'#9CA3AF',ord:2},
+  {id:'sem',label:'Sem dados',em:'➖',color:'#6B7280',ord:3},
+  {id:'bom',label:'Bom',em:'🔵',color:'#5B8DEF',ord:4},
+  {id:'excelente',label:'Excelente',em:'🟢',color:'#36d399',ord:5}
+];
+const resultMeta=id=>RESULT_STATUS.find(s=>s.id===id)||RESULT_STATUS[3];
+let painelCache=null, painelLoaded=false, painelLoading=false;
+async function loadPainel(){
+  if(painelLoading)return; painelLoading=true;
+  try{const r=await window.storage.get('floow-painel',true);painelCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
+  catch(e){painelCache={clientes:[]};}
+  painelLoaded=true;painelLoading=false;
+  if(tab==='resultados')renderResultadosInner();
+}
+function painelMap(){const m={};((painelCache&&painelCache.clientes)||[]).forEach(c=>{if(c.code)m[String(c.code)]=c;});return m;}
+function resultCfg(){return {
+  roasExc:Number(state.painelRoasExc)||10,                                   // acima disso = Excelente
+  roasObs:Number(state.painelRoasObs)||8,                                    // de roasObs até roasExc = Bom; abaixo = Observação
+  roasRuim:Number(state.painelRoasRuim)||6,                                  // abaixo disso = Ruim
+  custoBom:(state.painelCustoBom!=null?Number(state.painelCustoBom):1.0),    // conversa abaixo disso = boa
+  custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5)  // conversa acima disso = cara
+};}
+function resultAuto(m,cfg){
+  if(!m)return 'sem';
+  const inv=Number(m.investido)||0,fat=Number(m.faturamento)||0,conv=Number(m.conversas)||0;
+  if(inv<=0&&fat<=0&&conv<=0)return 'sem';
+  if(fat<=0)return 'semvendas';
+  const roas=inv>0?fat/inv:0;
+  if(roas>cfg.roasExc)return 'excelente';   // acima de 10x
+  if(roas>=cfg.roasObs)return 'bom';        // 8 a 10x
+  if(roas>=cfg.roasRuim)return 'observacao';// 6 a 8x
+  return 'ruim';                            // abaixo de 6x
+}
+function custoNivel(custo,cfg){
+  if(custo==null)return {label:'',color:'var(--txt)'};
+  if(custo<cfg.custoBom)return {label:'bom',color:'#36d399'};
+  if(custo>cfg.custoCaro)return {label:'caro',color:'#f2675c'};
+  return {label:'médio',color:'#f5b400'};
+}
+function resultFinal(c,m,cfg){return (c.resultStatus&&c.resultStatus!=='auto')?c.resultStatus:resultAuto(m,cfg);}
+function setResultStatus(cid,val){const c=clientById(cid);if(!c)return;c.resultStatus=val;touch(c);saveData();renderResultadosInner();}
+function setResultNote(cid,val){const c=clientById(cid);if(!c)return;c.resultNote=val;touch(c);saveData();}
+function setPainelCfg(){
+  state.painelRoasExc=Number($('#pRoasExc').value)||10;
+  state.painelRoasObs=Number($('#pRoasObs').value)||8;
+  state.painelRoasRuim=Number($('#pRoasRuim').value)||6;
+  state.painelCustoBom=Number($('#pCustoBom').value)||1;
+  state.painelCustoCaro=Number($('#pCustoCaro').value)||1.5;
+  saveData();renderResultadosInner();
+}
+function refreshPainel(){painelLoaded=false;loadPainel();renderResultadosInner();}
+function renderResultados(app){app.insertAdjacentHTML('beforeend','<div id="resWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();renderResultadosInner();}
+function renderResultadosInner(){
+  const wrap=$('#resWrap');if(!wrap)return;
+  const cfg=resultCfg();
+  if(!painelLoaded){wrap.innerHTML='<div class="panel"><div class="empty-hint" style="padding:18px">Carregando resultados…</div></div>';return;}
+  const map=painelMap();
+  const when=(painelCache&&painelCache.updatedAt)?new Date(painelCache.updatedAt):null;
+  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=c.code?map[String(c.code)]:null;return {c,m,st:resultFinal(c,m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
+  const cnt={};RESULT_STATUS.forEach(s=>cnt[s.id]=0);rows.forEach(r=>cnt[r.st]++);
+  const chips=RESULT_STATUS.map(s=>`<span class="it"><span class="dot" style="background:${s.color}"></span>${s.em} ${s.label} <b>${cnt[s.id]}</b></span>`).join('');
+  rows.sort((a,b)=>resultMeta(a.st).ord-resultMeta(b.st).ord||(a.c.name||'').localeCompare(b.c.name||'','pt'));
+  const optSel=c=>{const cur=c.resultStatus||'auto';const o=[['auto','🤖 Automático'],['excelente','🟢 Excelente'],['bom','🔵 Bom'],['observacao','🟡 Observação'],['ruim','🔴 Ruim'],['semvendas','⚪ Sem vendas']];
+    return `<select class="filter" onchange="setResultStatus('${c.id}',this.value)">${o.map(x=>`<option value="${x[0]}" ${x[0]===cur?'selected':''}>${x[1]}</option>`).join('')}</select>`;};
+  const body=rows.map(r=>{const m=r.m;const sm=resultMeta(r.st);
+    const inv=m?fmtBRL(m.investido):'—',conv=m?(Number(m.conversas)||0):'—',vend=m?(Number(m.vendas)||0):'—',fat=m?fmtBRL(m.faturamento):'—';
+    const roas=(m&&Number(m.investido)>0)?((Number(m.faturamento)||0)/Number(m.investido)).toFixed(1)+'x':'—';
+    const taxa=(m&&Number(m.conversas)>0)?((Number(m.vendas)||0)/Number(m.conversas)*100).toFixed(1)+'%':'—';
+    const custoV=(m&&Number(m.conversas)>0)?(Number(m.investido)||0)/Number(m.conversas):null;
+    const cn=custoNivel(custoV,cfg);
+    const cc=custoV!=null?`<span style="color:${cn.color};font-weight:600" title="${cn.label}">${fmtBRL(custoV)}</span>`:'—';
+    return `<tr>
+      <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
+      <td>${inv}</td><td>${conv}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${roas}</td><td>${cc}</td>
+      <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</td>
+      <td>${optSel(r.c)}</td>
+      <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
+    </tr>`;}).join('');
+  wrap.innerHTML=`
+    <div class="panel">
+      <div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
+        <div>
+          <div class="cfg-dem-lbl">🎯 ROAS — faixas (x)</div>
+          <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            🟢 acima de <input class="t" id="pRoasExc" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasExc}" onchange="setPainelCfg()">
+            · 🟡 abaixo de <input class="t" id="pRoasObs" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasObs}" onchange="setPainelCfg()">
+            · 🔴 abaixo de <input class="t" id="pRoasRuim" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasRuim}" onchange="setPainelCfg()">
+          </span>
+        </div>
+        <div>
+          <div class="cfg-dem-lbl">💬 Custo por conversa (R$)</div>
+          <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            🟢 abaixo de <input class="t" id="pCustoBom" type="number" min="0" step="0.1" style="width:74px" value="${cfg.custoBom}" onchange="setPainelCfg()">
+            · 🔴 acima de <input class="t" id="pCustoCaro" type="number" min="0" step="0.1" style="width:74px" value="${cfg.custoCaro}" onchange="setPainelCfg()">
+          </span>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn ghost" onclick="refreshPainel()">🔄 Atualizar</button>
+      </div>
+      <div class="hleg" style="margin-top:10px">${chips}</div>
+      ${when?`<div class="empty-hint" style="margin-top:6px">Dados do robô · atualizado em ${pad(when.getDate())}/${pad(when.getMonth()+1)} às ${pad(when.getHours())}:${pad(when.getMinutes())}</div>`:`<div class="empty-hint" style="margin-top:6px">⚠️ Ainda não recebi dados do robô. Rode <b>gerarPainelGeral</b> no Apps Script (e cole a anon key lá).</div>`}
+    </div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="res-table">
+        <thead><tr><th>Cliente</th><th>Investido</th><th>Conversas</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>ROAS</th><th>Custo/conv</th><th>Situação</th><th>✏️ Você define</th><th>Obs.</th></tr></thead>
+        <tbody>${body||'<tr><td colspan="11" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
 
 /* ---------- integração com o Google Agenda ---------- */
 const GCAL_SCOPE='https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar.events'; // Drive (pastas) + Agenda

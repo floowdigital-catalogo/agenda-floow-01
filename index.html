@@ -1895,9 +1895,9 @@ function setPainelPeriod(p){painelPeriod=p;renderResultadosInner();}
 function setPainelCustom(){painelFrom=$('#pFrom').value;painelTo=$('#pTo').value;if(painelFrom&&painelTo)renderResultadosInner();}
 function painelPeriodLabel(){const r=painelRange();if(!r)return 'mostrando o total acumulado';return `mostrando ${r.from.split('-').reverse().join('/')} até ${r.to.split('-').reverse().join('/')}`;}
 function resultCfg(){return {
-  roasExc:Number(state.painelRoasExc)||10,                                   // acima disso = Excelente
-  roasObs:Number(state.painelRoasObs)||8,                                    // de roasObs até roasExc = Bom; abaixo = Observação
-  roasRuim:Number(state.painelRoasRuim)||6,                                  // abaixo disso = Ruim
+  lucroExc:Number(state.painelLucroExc)||2,                                  // lucro ≥ 2× investido = Excelente
+  lucroBom:Number(state.painelLucroBom)||1.2,                                // lucro ≥ 1,2× investido = Bom
+  lucroObs:Number(state.painelLucroObs)||0.8,                                // lucro ≥ 0,8× investido = Observação (empate)
   custoBom:(state.painelCustoBom!=null?Number(state.painelCustoBom):1.0),    // conversa abaixo disso = boa
   custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5), // conversa acima disso = cara
   margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem%
@@ -1905,13 +1905,15 @@ function resultCfg(){return {
 function resultAuto(m,cfg){
   if(!m)return 'sem';
   const inv=Number(m.investido)||0,fat=Number(m.faturamento)||0,conv=Number(m.conversas)||0;
-  if(inv<=0&&fat<=0&&conv<=0)return 'sem';
-  if(fat<=0)return 'semvendas';
-  const roas=inv>0?fat/inv:0;
-  if(roas>cfg.roasExc)return 'excelente';   // acima de 10x
-  if(roas>=cfg.roasObs)return 'bom';        // 8 a 10x
-  if(roas>=cfg.roasRuim)return 'observacao';// 6 a 8x
-  return 'ruim';                            // abaixo de 6x
+  if(inv<=0&&fat<=0&&conv<=0)return 'sem';      // sem dados
+  if(fat<=0)return 'ruim';                       // não vendeu
+  const lucro=fat*(cfg.margem/100);
+  if(inv<=0)return 'excelente';                  // vendeu sem gastar em anúncio
+  const r=lucro/inv;                             // quantas vezes o lucro cobre o investido
+  if(r>=cfg.lucroExc)return 'excelente';
+  if(r>=cfg.lucroBom)return 'bom';
+  if(r>=cfg.lucroObs)return 'observacao';
+  return 'ruim';                                 // lucro < investido = prejuízo
 }
 function custoNivel(custo,cfg){
   if(custo==null)return {label:'',color:'var(--txt)'};
@@ -1924,9 +1926,9 @@ function clientSituacao(c){if(!c)return 'sem';return resultFinal(c,metricsFor(c.
 function setResultStatus(cid,val){const c=clientById(cid);if(!c)return;c.resultStatus=val;touch(c);saveData();renderResultadosInner();}
 function setResultNote(cid,val){const c=clientById(cid);if(!c)return;c.resultNote=val;touch(c);saveData();}
 function setPainelCfg(){
-  state.painelRoasExc=Number($('#pRoasExc').value)||10;
-  state.painelRoasObs=Number($('#pRoasObs').value)||8;
-  state.painelRoasRuim=Number($('#pRoasRuim').value)||6;
+  state.painelLucroExc=Number($('#pLucroExc').value)||2;
+  state.painelLucroBom=Number($('#pLucroBom').value)||1.2;
+  state.painelLucroObs=Number($('#pLucroObs').value)||0.8;
   state.painelCustoBom=Number($('#pCustoBom').value)||1;
   state.painelCustoCaro=Number($('#pCustoCaro').value)||1.5;
   state.painelMargem=Number($('#pMargem').value)||20;
@@ -1976,11 +1978,11 @@ function renderResultadosInner(){
       </div>
       <div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
         <div>
-          <div class="cfg-dem-lbl">🎯 ROAS — faixas (x)</div>
+          <div class="cfg-dem-lbl">🎯 Situação — quantas vezes o lucro cobre o investido</div>
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            🟢 acima de <input class="t" id="pRoasExc" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasExc}" onchange="setPainelCfg()">
-            · 🟡 abaixo de <input class="t" id="pRoasObs" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasObs}" onchange="setPainelCfg()">
-            · 🔴 abaixo de <input class="t" id="pRoasRuim" type="number" min="0" step="0.5" style="width:62px" value="${cfg.roasRuim}" onchange="setPainelCfg()">
+            🟢 Excelente ≥ <input class="t" id="pLucroExc" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroExc}" onchange="setPainelCfg()">x
+            · 🔵 Bom ≥ <input class="t" id="pLucroBom" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroBom}" onchange="setPainelCfg()">x
+            · 🟡 Observação ≥ <input class="t" id="pLucroObs" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroObs}" onchange="setPainelCfg()">x
           </span>
         </div>
         <div>

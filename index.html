@@ -729,6 +729,8 @@ let hoursView='week'; // 'day' | 'week' | 'month' no relatório de Horas
 let editingId=null, draftType='outro', draftResp=null, draftDone=false;
 let fClient='', fResp='';            // calendar filters
 const isAdmin=()=>!!(currentUser&&currentUser.isAdmin);
+const isCS=()=>!!(currentUser&&currentUser.isCS&&!currentUser.isAdmin); // Customer Success: gerencia, mas SEM Financeiro/Config/Horas
+const canManage=()=>isAdmin()||isCS(); // pode criar/editar tarefas e ver dados de toda a equipe
 const myMember=()=>currentUser?currentUser.id:null;
 let clientSearch='', clientStatusFilter='all', clientHealthFilter='all';
 let openClientId=null, clientDraftStatus='ativo', clientDraftOwner=null;
@@ -849,7 +851,7 @@ function doLogin(){
   const email=$('#liEmail').value.trim().toLowerCase();const pass=$('#liPass').value;
   const u=state.users.find(x=>x.email.toLowerCase()===email&&x.pass===pass);
   if(!u){$('#liErr').textContent='E-mail ou senha incorretos.';return;}
-  currentUser=u;tab=u.isAdmin?'dash':'cal';saveSession();render();
+  currentUser=u;tab=(u.isAdmin||u.isCS)?'dash':'cal';saveSession();render();
 }
 function logout(){currentUser=null;saveSession();tab='cal';fClient='';fResp='';render();}
 
@@ -888,7 +890,7 @@ function seed(){
 /* ---------- helpers ---------- */
 function visibleEvents(){
   let evs=state.events.slice();
-  if(!isAdmin()){return evs.filter(e=>e.resp===myMember());}
+  if(!canManage()){return evs.filter(e=>e.resp===myMember());}
   if(fClient)evs=evs.filter(e=>e.clientId===fClient);
   if(fResp)evs=evs.filter(e=>e.resp===fResp);
   return evs;
@@ -922,17 +924,20 @@ function render(){
   }
   const app=$('#app');app.innerHTML='';
   const nav=document.createElement('div');nav.className='tabs';
-  if(isAdmin()){
+  if(canManage()){
+    const full=isAdmin(); // só admin vê Horas, Financeiro e Config
+    const allowed=full?['dash','cal','tasks','deliver','otim','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','clients'];
+    if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
     nav.innerHTML=`
       <button class="tab ${tab==='dash'?'on':''}" onclick="setTab('dash')">📊 Painel</button>
       <button class="tab ${tab==='cal'?'on':''}" onclick="setTab('cal')">📅 Calendário</button>
       <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
       <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
       <button class="tab ${tab==='otim'?'on':''}" onclick="setTab('otim')">📈 Otimizações</button>
-      <button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>
-      <button class="tab sep ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>
+      ${full?`<button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>`:''}
+      ${full?`<button class="tab sep ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>`:''}
       <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
-      <button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`;
+      ${full?`<button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`:''}`;
     app.appendChild(nav);
     if(tab==='dash')renderDash(app);
     else if(tab==='clients')renderClients(app);
@@ -976,11 +981,11 @@ function renderUserChip(){
   const hasNotif=('Notification' in window);
   const notifOn=hasNotif&&Notification.permission==='granted';
   const notifBtn=hasNotif?`<button class="uc-btn" onclick="requestNotifyPermission()" title="${notifOn?'Avisos de tarefas ativados':'Ativar avisos de tarefas (20 min antes)'}">${notifOn?'🔔':'🔕'}</button>`:'';
-  const gBtn=(isAdmin()&&googleClientId())?`<button class="uc-btn" onclick="connectGoogle()" title="${gConnectedFlag()?'Google conectado (reconectar)':'Conectar Google Drive'}">${gConnectedFlag()?'🔗✓':'🔗'}</button>`:'';
+  const gBtn=(canManage()&&googleClientId())?`<button class="uc-btn" onclick="connectGoogle()" title="${gConnectedFlag()?'Google conectado (reconectar)':'Conectar Google Drive'}">${gConnectedFlag()?'🔗✓':'🔗'}</button>`:'';
   $('#userChip').innerHTML=`
     <span class="uc-dot" style="background:${currentUser.color||'#888'}"></span>
     <span class="uc-name">${esc(currentUser.name)}</span>
-    <span class="uc-role">${isAdmin()?'Admin':'Equipe'}</span>
+    <span class="uc-role">${isAdmin()?'Admin':(isCS()?'CS':'Equipe')}</span>
     ${gBtn}${notifBtn}
     <button class="uc-btn" onclick="logout()" title="Sair">Sair</button>`;
 }
@@ -1255,9 +1260,9 @@ function renderTasks(app){
   const byDate=(a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
   const itemHtml=(e,over)=>{const d=parseISO(e.date);const dd=`${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
     return `<div class="tk${over?' over':''}" onclick="openEv('${e.id}')"><span class="tk-d">${over?'⚠ ':''}${dd}${fmtRange(e)?' · '+fmtRange(e):''}</span><span class="tk-t">${typeOf(e.type).em} ${esc(e.title)}<span class="tk-c"> · ${esc(clientName(e.clientId))}</span></span></div>`;};
-  const members=isAdmin()?state.users:state.users.filter(m=>m.id===myMember());
+  const members=canManage()?state.users:state.users.filter(m=>m.id===myMember());
   let totalOver=0;members.forEach(m=>{totalOver+=state.events.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;});
-  const head=`<div class="list-head">${isAdmin()?'Tarefas por usuário':'Suas tarefas'} · <b class="${totalOver?'bad':''}">${totalOver} atrasada${totalOver===1?'':'s'}</b></div>`;
+  const head=`<div class="list-head">${canManage()?'Tarefas por usuário':'Suas tarefas'} · <b class="${totalOver?'bad':''}">${totalOver} atrasada${totalOver===1?'':'s'}</b></div>`;
   const panels=members.map(m=>{
     const mine=state.events.filter(e=>e.resp===m.id);
     const overdue=mine.filter(e=>!e.done&&e.date<today).sort(byDate);
@@ -1320,7 +1325,7 @@ function renderCal(app){
   else if(view==='week'){const s=startOfWeek(cursor);const e=new Date(s);e.setDate(s.getDate()+6);period=`${s.getDate()}–${e.getDate()} ${MONTHS[e.getMonth()]}`;}
   else if(view==='day')period=`${DOW[cursor.getDay()]}, ${cursor.getDate()} de ${MONTHS[cursor.getMonth()]}`;
   else period='Lista de demandas';
-  const adminCtrls=isAdmin()?`
+  const adminCtrls=canManage()?`
     <div class="spacer"></div>
     <select class="filter" id="cFilter" onchange="fClient=this.value;render()"></select>
     <select class="filter" id="rFilter" onchange="fResp=this.value;render()"></select>
@@ -1336,7 +1341,7 @@ function renderCal(app){
       <button class="${view==='list'?'on':''}" onclick="setView('list')">Lista</button>
     </div>${adminCtrls}`;
   app.appendChild(tb);
-  if(isAdmin()){
+  if(canManage()){
     const cf=tb.querySelector('#cFilter');
     cf.innerHTML=`<option value="">Todos os clientes</option>`+state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${c.id}" ${c.id===fClient?'selected':''}>${esc(c.name)}</option>`).join('');
     const rf=tb.querySelector('#rFilter');
@@ -1390,7 +1395,7 @@ function renderDay(app){
   const today=sameDay(d,new Date());
 
   const sum=document.createElement('div');sum.className='day-summary';
-  sum.innerHTML=`<div><b>${load.count}</b> demanda${load.count===1?'':'s'} no dia${load.mins?` · <b>${fmtDur(load.mins)}</b> agendadas`:''}${!isAdmin()?` · ${esc(currentUser.name)}`:''}</div>
+  sum.innerHTML=`<div><b>${load.count}</b> demanda${load.count===1?'':'s'} no dia${load.mins?` · <b>${fmtDur(load.mins)}</b> agendadas`:''}${!canManage()?` · ${esc(currentUser.name)}`:''}</div>
     <div class="cap">${load.count?capacityBar(load.mins):'<span class="empty-hint" style="margin:0">Dia livre</span>'}</div>`;
   app.appendChild(sum);
 
@@ -1478,7 +1483,7 @@ function packLanes(evs){
 /* ---------- LIST view (all demands w/ date + time) ---------- */
 function renderList(app){
   let evs=visibleEvents().slice().sort((a,b)=>(a.date+(a.time||'00:00')).localeCompare(b.date+(b.time||'00:00')));
-  const who=!isAdmin()?currentUser.name:(fResp?respName(fResp):'toda a equipe');
+  const who=!canManage()?currentUser.name:(fResp?respName(fResp):'toda a equipe');
   const head=document.createElement('div');head.className='list-head';
   head.innerHTML=`Mostrando <b>${evs.length}</b> demanda${evs.length===1?'':'s'} de <b>${esc(who)}</b>`;
   app.appendChild(head);
@@ -1657,9 +1662,9 @@ function closeClient(){$('#clientScrim').classList.remove('on');openClientId=nul
 
 /* ---------- event modal ---------- */
 function openEv(id,presetDate,presetClient){
-  if(!id&&!isAdmin())return; // só admin cria
+  if(!id&&!canManage())return; // só admin/CS cria
   editingId=id;const ev=id?state.events.find(e=>e.id===id):null;
-  const ro=!isAdmin(); // read-only para função (só marca concluído)
+  const ro=!canManage(); // read-only para função (só marca concluído)
   $('#evTitle').childNodes[0].nodeValue=ro?'Demanda ':(id?'Editar entrega ':'Nova entrega ');
   $('#fClient').value=ev?clientName(ev.clientId):(presetClient!==undefined?presetClient:(fClient?clientName(fClient):''));
   $('#fDate').value=ev?ev.date:(presetDate||iso(new Date()));
@@ -1674,7 +1679,7 @@ function openEv(id,presetDate,presetClient){
   ['fClient','fDate','fTime','fEnd','fLoc'].forEach(idf=>$('#'+idf).disabled=ro);
   $('#fTypes').style.pointerEvents=ro?'none':'';$('#fTypes').style.opacity=ro?'.6':'';
   $('#fResps').style.pointerEvents=ro?'none':'';$('#fResps').style.opacity=ro?'.6':'';
-  $('#evDel').style.display=(id&&isAdmin())?'block':'none';
+  $('#evDel').style.display=(id&&canManage())?'block':'none';
   $('#evSave').textContent=ro?'Salvar status':'Salvar';
   $('#evScrim').classList.add('on');
 }
@@ -1701,7 +1706,7 @@ function updateDurHint(){
 }
 $('#fEnd')&&document.addEventListener('input',e=>{if(e.target.id==='fEnd')updateDurHint();});
 function saveEv(){
-  if(!isAdmin()){ // função só altera o "concluído" da própria demanda
+  if(!canManage()){ // função só altera o "concluído" da própria demanda
     if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&e.resp===myMember()){e.done=draftDone;touch(e);applyDeliveryLink(e);}}
     saveData();closeEv();render();toast(draftDone?'Concluído — entrega marcada':'Status atualizado');return;
   }
@@ -1715,7 +1720,7 @@ function saveEv(){
   applyDeliveryLink(ref);
   saveData();syncEventToGoogle(ref);closeEv();render();toast(editingId?'Entrega atualizada':'Entrega criada');
 }
-function deleteEv(){if(!editingId||!isAdmin())return;const ev=state.events.find(e=>e.id===editingId);deleteGoogleEvent(ev);if(state.tombstones)state.tombstones.events[editingId]=Date.now();state.events=state.events.filter(e=>e.id!==editingId);saveData();closeEv();render();toast('Entrega excluída');}
+function deleteEv(){if(!editingId||!canManage())return;const ev=state.events.find(e=>e.id===editingId);deleteGoogleEvent(ev);if(state.tombstones)state.tombstones.events[editingId]=Date.now();state.events=state.events.filter(e=>e.id!==editingId);saveData();closeEv();render();toast('Entrega excluída');}
 
 /* ---------- config tab (admin): usuários + demandas ---------- */
 let cfgDraft=null, typesDraft=null, checkDraft=null;
@@ -1755,6 +1760,7 @@ function renderCfgList(){
         <input type="color" class="tcolor" value="${u.color||'#888888'}" oninput="cfgDraft[${i}].color=this.value">
         <input class="t uname" value="${esc(u.name)}" placeholder="Nome" oninput="cfgDraft[${i}].name=this.value">
         <label class="uadmin"><input type="checkbox" ${u.isAdmin?'checked':''} onchange="cfgDraft[${i}].isAdmin=this.checked;renderCfgList()"> Admin</label>
+        ${u.isAdmin?'':`<label class="uadmin" title="Customer Success: vê Painel, Calendário, Tarefas, Entregas, Otimizações e Clientes — mas NÃO o Financeiro nem o Config"><input type="checkbox" ${u.isCS?'checked':''} onchange="cfgDraft[${i}].isCS=this.checked"> 🤝 CS</label>`}
         ${googleClientId()?`<label class="uadmin" title="Criar as tarefas desta pessoa direto na Agenda do Google dela"><input type="checkbox" ${u.googleSync?'checked':''} onchange="cfgDraft[${i}].googleSync=this.checked"> 📅 Agenda</label>`:''}
         <button class="rm" onclick="cfgDraft.splice(${i},1);renderCfgList()">×</button>
       </div>
@@ -1811,7 +1817,7 @@ function saveConfig(){
   if(!types.length){toast('Mantenha ao menos 1 demanda');return;}
   const check=checkDraft.filter(c=>c.label.trim());
   const validLinks=new Set(check.map(c=>c.id));
-  state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
+  state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,isCS:!!u.isCS&&!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
   state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
   if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');

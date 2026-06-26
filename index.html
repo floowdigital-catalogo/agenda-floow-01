@@ -572,15 +572,9 @@
       <div style="flex:2"><label class="f">Nome</label><input class="t" id="clName"></div>
       <div><label class="f">Código</label><input class="t" id="clCode" placeholder="Ex: 67"></div>
     </div>
-    <div class="two">
-      <div>
-        <label class="f">Situação</label>
-        <select class="t" id="clHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select>
-      </div>
-      <div>
-        <label class="f">Status</label>
-        <select class="t" id="clStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select>
-      </div>
+    <div>
+      <label class="f">Status</label>
+      <select class="t" id="clStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select>
     </div>
     <label class="f">Gestor de Projetos</label>
     <select class="t" id="clOwner"></select>
@@ -623,10 +617,7 @@
     <h2>Novo cliente <span class="x" onclick="closeAdd()">&times;</span></h2>
     <label class="f">Nome</label>
     <input class="t" id="aName" placeholder="Ex: Brizzon Jeans" onkeydown="if(event.key==='Enter')saveAdd()">
-    <div class="two">
-      <div><label class="f">Código <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aCode" placeholder="Ex: 67"></div>
-      <div><label class="f">Situação</label><select class="t" id="aHealth"><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante" selected>Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option></select></div>
-    </div>
+    <div><label class="f">Código <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aCode" placeholder="Ex: 67"></div>
     <div class="two">
       <div><label class="f">Status</label><select class="t" id="aStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select></div>
       <div><label class="f">Gestor de Projetos</label><select class="t" id="aOwner"></select></div>
@@ -922,6 +913,7 @@ function clientNext(id){
 /* ---------- render shell ---------- */
 function render(){
   if(!currentUser){renderLogin();return;}
+  if(canManage()&&!painelLoaded&&!painelLoading)loadPainel(); // carrega a situação (aba Resultados) p/ Painel/Otimizações
   renderUserChip();
   if(!notifyReady){
     notifyReady=true;
@@ -1009,15 +1001,15 @@ function renderDash(app){
   const pend=evs.filter(e=>!e.done).length;
   const atras=evs.filter(e=>!e.done&&e.date<today).length;
   const optVenc=cs.filter(c=>c.status!=='arquivado'&&optAlertLevel(c)==='red').length;
-  const hc={};HEALTH.forEach(h=>hc[h.id]=0);cs.forEach(c=>hc[c.health||'bom']++);
-  const segs=HEALTH.map(h=>hc[h.id]?`<span style="width:${(hc[h.id]/Math.max(total,1)*100)}%;background:${h.color}" title="${h.label}: ${hc[h.id]}"></span>`:'').join('');
-  const leg=HEALTH.map(h=>`<span class="it"><span class="dot" style="background:${h.color}"></span>${h.label} <b>${hc[h.id]}</b></span>`).join('');
+  const situ={};cs.forEach(c=>{const s=clientSituacao(c);situ[s]=(situ[s]||0)+1;});
+  const segs=RESULT_STATUS.map(h=>situ[h.id]?`<span style="width:${(situ[h.id]/Math.max(total,1)*100)}%;background:${h.color}" title="${h.label}: ${situ[h.id]}"></span>`:'').join('');
+  const leg=RESULT_STATUS.map(h=>situ[h.id]?`<span class="it"><span class="dot" style="background:${h.color}"></span>${h.label} <b>${situ[h.id]}</b></span>`:'').join('');
   const funcs=state.users;
   const maxLoad=Math.max(1,...funcs.map(m=>evs.filter(e=>e.resp===m.id&&!e.done).length));
   const loadRows=funcs.map(m=>{const n=evs.filter(e=>e.resp===m.id&&!e.done).length;const ov=evs.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;
     return `<div class="loadrow"><span class="ln">${esc(respName(m.id))}</span><div class="lbar"><span style="width:${n/maxLoad*100}%;background:${m.color}"></span></div><span class="ln-n">${n}${ov?` <b class="bad">(${ov}!)</b>`:''}</span></div>`;}).join('');
-  const attn=cs.filter(c=>['ruim','observacao'].includes(c.health)).sort((a,b)=>(a.health==='ruim'?0:1)-(b.health==='ruim'?0:1));
-  const attnHtml=attn.length?attn.map(c=>{const h=healthOf(c.health);return `<div class="attn-item" style="--h:${h.color}" onclick="setTab('clients');setTimeout(()=>openClient('${c.id}'),80)"><span class="hbadge" style="--h:${h.color}">${h.label}</span><b>${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}</b><span class="attn-pend">${clientPending(c.id)} pend.</span></div>`;}).join(''):'<div class="tp-empty">Nenhum cliente em alerta 🎉</div>';
+  const attn=cs.map(c=>({c,s:clientSituacao(c)})).filter(x=>['ruim','observacao'].includes(x.s)).sort((a,b)=>(a.s==='ruim'?0:1)-(b.s==='ruim'?0:1));
+  const attnHtml=attn.length?attn.map(x=>{const c=x.c;const h=resultMeta(x.s);return `<div class="attn-item" style="--h:${h.color}" onclick="setTab('resultados')"><span class="hbadge" style="--h:${h.color}">${h.em} ${h.label}</span><b>${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}</b><span class="attn-pend">${clientPending(c.id)} pend.</span></div>`;}).join(''):'<div class="tp-empty">Nenhum cliente em alerta 🎉</div>';
   // entregas / onboarding
   cs.forEach(ensureChecklist);
   const completos=cs.filter(deliverComplete).length;
@@ -1195,27 +1187,17 @@ function renderOptInner(){
   const vencidas=cs.filter(c=>optAlertLevel(c)==='red').length, proximas=cs.filter(c=>optAlertLevel(c)==='yellow').length;
   const fmtD=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
   const cards=cs.map(c=>{
-    const hl=healthOf(c.health);const al=optAlertLevel(c);const nx=nextOptDate(c);
-    let status;
-    if(c.weekSold===undefined||c.weekSold===null)status='<span style="color:var(--txt-faint)">Ainda não marcado essa semana</span>';
-    else if(c.weekSold===true)status=c.prevWeekSold===true?'🟢 Vendeu 2 semanas seguidas → <b>Excelente</b>':'🔵 Vendeu essa semana → <b>Bom</b>';
-    else status=c.prevWeekSold===false?'🔴 2 semanas sem vender → <b>Ruim</b>':'🟠 Não vendeu essa semana → <b>Observação</b>';
+    const hl=resultMeta(clientSituacao(c));const al=optAlertLevel(c);const nx=nextOptDate(c);
     const chip=al==='red'?'<span class="opt-chip red">vencida</span>':al==='yellow'?'<span class="opt-chip yellow">em breve</span>':'';
     return `<div class="opt-card" style="border-top:3px solid ${hl.color}">
       <div class="opt-top">
         <span class="opt-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
-        <span class="hbadge" style="--h:${hl.color}">${hl.label}</span>
+        <span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span>
       </div>
       <div class="opt-grid">
         <label class="opt-f"><span>Última otimização</span><input class="t" type="date" value="${c.optDate||''}" onchange="setOptDate('${c.id}',this.value)"></label>
         <label class="opt-f"><span>Próxima otimização</span><div class="opt-next ${al}">${nx?fmtD(nx):'—'} ${chip}</div></label>
       </div>
-      <div class="opt-sales">
-        <span class="opt-lbl">Vendeu essa semana?</span>
-        <button class="opt-btn ${c.weekSold===true?'on yes':''}" onclick="markSold('${c.id}',true)">Sim</button>
-        <button class="opt-btn ${c.weekSold===false?'on no':''}" onclick="markSold('${c.id}',false)">Não</button>
-      </div>
-      <div class="opt-status">${status}</div>
       <label class="opt-f" style="margin-top:10px"><span>O que foi feito / observações</span>
         <textarea class="t" placeholder="Descreva o que foi feito na otimização ou alguma observação…" onchange="setOptNotes('${c.id}',this.value)" style="min-height:56px;font-size:13px">${esc(c.optNotes||'')}</textarea></label>
     </div>`;}).join('');
@@ -1225,7 +1207,7 @@ function renderOptInner(){
       <div class="metric ${vencidas?'alert':''}"><div class="mv">${vencidas}</div><div class="ml">🔴 Otimizações vencidas</div></div>
       <div class="metric"><div class="mv">${proximas}</div><div class="ml">🟡 Próximas (1-2 dias)</div></div>
     </div>
-    <div class="empty-hint" style="margin:-4px 0 12px">Ao fechar a semana (ex.: toda <b>sexta</b>), marque <b>"Vendeu essa semana?"</b>. O desempenho se ajusta sozinho: vendeu → <b>Bom</b> · vendeu 2 semanas seguidas → <b>Excelente</b> · não vendeu → <b>Observação</b> · marcou "Não" 2 semanas seguidas → <b>Ruim</b>. A próxima otimização é 7 dias após a última.</div>
+    <div class="empty-hint" style="margin:-4px 0 12px">A próxima otimização é 7 dias após a última. A <b>situação</b> (🟢🔵🟡🔴) é automática pelos resultados — veja e ajuste na aba <b>📊 Resultados</b>.</div>
     <div class="opt-grid-wrap">${cards||'<div class="empty-state">Nenhum cliente.</div>'}</div>`;
 }
 
@@ -1531,7 +1513,7 @@ function renderClients(app){
   bar.innerHTML=`
     <input class="search" id="cSearch" placeholder="🔍 Buscar cliente…" value="${esc(clientSearch)}" oninput="clientSearch=this.value;renderClientGrid()">
     <select class="filter" id="cHealthF" onchange="clientHealthFilter=this.value;renderClientGrid()">
-      <option value="all">Toda situação</option><option value="excelente">Excelente</option><option value="bom">Bom</option><option value="iniciante">Iniciante</option><option value="observacao">Observação</option><option value="ruim">Ruim</option>
+      <option value="all">Toda situação</option><option value="excelente">🟢 Excelente</option><option value="bom">🔵 Bom</option><option value="observacao">🟡 Observação</option><option value="ruim">🔴 Ruim</option><option value="semvendas">⚪ Sem vendas</option><option value="sem">➖ Sem dados</option>
     </select>
     <select class="filter" id="cStatusF" onchange="clientStatusFilter=this.value;renderClientGrid()">
       <option value="all">Todos (${state.clients.length})</option><option value="ativo">Ativos</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados</option>
@@ -1553,16 +1535,16 @@ function renderClientGrid(){
   const wrap=$('#clientGridWrap');if(!wrap)return;
   let list=state.clients.slice();
   if(clientStatusFilter!=='all')list=list.filter(c=>c.status===clientStatusFilter);
-  if(clientHealthFilter!=='all')list=list.filter(c=>(c.health||'bom')===clientHealthFilter);
+  if(clientHealthFilter!=='all')list=list.filter(c=>clientSituacao(c)===clientHealthFilter);
   if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase();list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q));}
   list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   if(!list.length){wrap.innerHTML=`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
   const grid=document.createElement('div');grid.className='cgrid';
   grid.innerHTML=list.map(c=>{
-    const nx=clientNext(c.id);const pend=clientPending(c.id);const hl=healthOf(c.health);
+    const nx=clientNext(c.id);const pend=clientPending(c.id);const hl=resultMeta(clientSituacao(c));
     const nxTxt=nx?`Próx.: <b>${esc(typeOf(nx.type).label)}</b> · ${parseISO(nx.date).getDate()}/${pad(parseISO(nx.date).getMonth()+1)}`:'Sem tarefas futuras';
     return `<div class="ccard" onclick="openClient('${c.id}')">
-      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.label}</span></div>
+      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span></div>
       <div class="cmeta"><span><span class="cdot" style="background:${respColor(c.owner)}"></span>${esc(respName(c.owner))}</span><span><b>${pend}</b> pend. · ${c.status}</span></div>
       <div class="cnext">${nxTxt}</div></div>`;
   }).join('');
@@ -1577,7 +1559,7 @@ function parseClientLine(line){
 }
 /* detailed add modal */
 function openAdd(){
-  $('#aName').value='';$('#aCode').value='';$('#aStatus').value='ativo';$('#aHealth').value='bom';
+  $('#aName').value='';$('#aCode').value='';$('#aStatus').value='ativo';
   $('#aOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===pmId()?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#addScrim').classList.add('on');setTimeout(()=>$('#aName').focus(),30);
 }
@@ -1587,7 +1569,7 @@ function saveAdd(){
   const name=$('#aName').value.trim();if(!name){toast('Digite o nome');return;}
   const ex=state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase());
   if(ex){toast('Cliente já existe');closeAdd();openClient(ex.id);return;}
-  const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:$('#aHealth').value,owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
+  const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:'iniciante',owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
   state.clients.push(c);saveData();closeAdd();render();openClient(c.id);createClientDriveFolders(c);toast('Cliente cadastrado ✓');
 }
 /* bulk import modal */
@@ -1621,7 +1603,6 @@ function openClient(id){
   $('#clName').value=c.name||'';
   $('#clCode').value=c.code||'';
   $('#clStatus').value=c.status;
-  $('#clHealth').value=c.health||'bom';
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#clDrive').value=c.driveUrl||'';
   renderTimeline();
@@ -1642,7 +1623,7 @@ function saveClient(){
   const c=clientById(openClientId);if(!c)return;
   const newName=($('#clName').value||'').trim();if(newName)c.name=newName;
   c.code=($('#clCode').value||'').trim();
-  c.status=$('#clStatus').value;c.health=$('#clHealth').value;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
+  c.status=$('#clStatus').value;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
   saveData();closeClient();render();toast('Cliente atualizado');
 }
 function normUrl(u){return /^https?:\/\//i.test(u)?u:'https://'+u;}
@@ -1884,14 +1865,35 @@ const RESULT_STATUS=[
 ];
 const resultMeta=id=>RESULT_STATUS.find(s=>s.id===id)||RESULT_STATUS[3];
 let painelCache=null, painelLoaded=false, painelLoading=false;
+let painelPeriod='total', painelFrom='', painelTo=''; // filtro: total | mes | semana | custom
 async function loadPainel(){
   if(painelLoading)return; painelLoading=true;
   try{const r=await window.storage.get('floow-painel',true);painelCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
   catch(e){painelCache={clientes:[]};}
   painelLoaded=true;painelLoading=false;
-  if(tab==='resultados')renderResultadosInner();
+  if(currentUser)render(); // re-renderiza pra Painel/Otimizações/Resultados já mostrarem a situação
 }
 function painelMap(){const m={};((painelCache&&painelCache.clientes)||[]).forEach(c=>{if(c.code)m[String(c.code)]=c;});return m;}
+function painelRange(){
+  const today=new Date();
+  if(painelPeriod==='mes'){const s=new Date(today.getFullYear(),today.getMonth(),1),e=new Date(today.getFullYear(),today.getMonth()+1,0);return {from:iso(s),to:iso(e)};}
+  if(painelPeriod==='semana'){const s=startOfWeek(today),e=new Date(s);e.setDate(s.getDate()+6);return {from:iso(s),to:iso(e)};}
+  if(painelPeriod==='custom'&&painelFrom&&painelTo)return {from:painelFrom,to:painelTo};
+  return null; // total
+}
+function aggClient(raw){ // soma investido/conversas (semanas) e vendas/faturamento (vendas) no período
+  const r=painelRange(), ok=d=>!r||(d&&d>=r.from&&d<=r.to);
+  let inv=0,conv=0,vendas=0,fat=0;
+  const sem=(raw&&Array.isArray(raw.semanas))?raw.semanas:[];
+  const vds=(raw&&Array.isArray(raw.vendas))?raw.vendas:[];
+  sem.forEach(w=>{if(ok(w.d)){inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;}});
+  vds.forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
+  return {investido:inv,conversas:conv,vendas:vendas,faturamento:fat};
+}
+function metricsFor(code){const raw=code?painelMap()[String(code)]:null;return raw?aggClient(raw):null;}
+function setPainelPeriod(p){painelPeriod=p;renderResultadosInner();}
+function setPainelCustom(){painelFrom=$('#pFrom').value;painelTo=$('#pTo').value;if(painelFrom&&painelTo)renderResultadosInner();}
+function painelPeriodLabel(){const r=painelRange();if(!r)return 'mostrando o total acumulado';return `mostrando ${r.from.split('-').reverse().join('/')} até ${r.to.split('-').reverse().join('/')}`;}
 function resultCfg(){return {
   roasExc:Number(state.painelRoasExc)||10,                                   // acima disso = Excelente
   roasObs:Number(state.painelRoasObs)||8,                                    // de roasObs até roasExc = Bom; abaixo = Observação
@@ -1917,6 +1919,7 @@ function custoNivel(custo,cfg){
   return {label:'médio',color:'#f5b400'};
 }
 function resultFinal(c,m,cfg){return (c.resultStatus&&c.resultStatus!=='auto')?c.resultStatus:resultAuto(m,cfg);}
+function clientSituacao(c){if(!c)return 'sem';return resultFinal(c,metricsFor(c.code),resultCfg());} // situação do cliente = diagnóstico da aba Resultados (no período selecionado)
 function setResultStatus(cid,val){const c=clientById(cid);if(!c)return;c.resultStatus=val;touch(c);saveData();renderResultadosInner();}
 function setResultNote(cid,val){const c=clientById(cid);if(!c)return;c.resultNote=val;touch(c);saveData();}
 function setPainelCfg(){
@@ -1933,9 +1936,8 @@ function renderResultadosInner(){
   const wrap=$('#resWrap');if(!wrap)return;
   const cfg=resultCfg();
   if(!painelLoaded){wrap.innerHTML='<div class="panel"><div class="empty-hint" style="padding:18px">Carregando resultados…</div></div>';return;}
-  const map=painelMap();
   const when=(painelCache&&painelCache.updatedAt)?new Date(painelCache.updatedAt):null;
-  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=c.code?map[String(c.code)]:null;return {c,m,st:resultFinal(c,m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
+  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=metricsFor(c.code);return {c,m,st:resultFinal(c,m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
   const cnt={};RESULT_STATUS.forEach(s=>cnt[s.id]=0);rows.forEach(r=>cnt[r.st]++);
   const chips=RESULT_STATUS.map(s=>`<span class="it"><span class="dot" style="background:${s.color}"></span>${s.em} ${s.label} <b>${cnt[s.id]}</b></span>`).join('');
   rows.sort((a,b)=>resultMeta(a.st).ord-resultMeta(b.st).ord||(a.c.name||'').localeCompare(b.c.name||'','pt'));
@@ -1948,15 +1950,28 @@ function renderResultadosInner(){
     const custoV=(m&&Number(m.conversas)>0)?(Number(m.investido)||0)/Number(m.conversas):null;
     const cn=custoNivel(custoV,cfg);
     const cc=custoV!=null?`<span style="color:${cn.color};font-weight:600" title="${cn.label}">${fmtBRL(custoV)}</span>`:'—';
+    const lucroV=m?((Number(m.faturamento)||0)-(Number(m.investido)||0)):null;
+    const lucro=lucroV!=null?`<span style="color:${lucroV>=0?'#36d399':'#f2675c'};font-weight:600">${fmtBRL(lucroV)}</span>`:'—';
     return `<tr>
       <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
-      <td>${inv}</td><td>${conv}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${roas}</td><td>${cc}</td>
+      <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
       <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</td>
       <td>${optSel(r.c)}</td>
       <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
     </tr>`;}).join('');
   wrap.innerHTML=`
     <div class="panel">
+      <div class="cfg-row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span class="cfg-dem-lbl" style="margin:0">📅 Período:</span>
+        <div class="seg">
+          <button class="${painelPeriod==='total'?'on':''}" onclick="setPainelPeriod('total')">Total</button>
+          <button class="${painelPeriod==='mes'?'on':''}" onclick="setPainelPeriod('mes')">Mês</button>
+          <button class="${painelPeriod==='semana'?'on':''}" onclick="setPainelPeriod('semana')">Semana</button>
+          <button class="${painelPeriod==='custom'?'on':''}" onclick="setPainelPeriod('custom')">Personalizado</button>
+        </div>
+        ${painelPeriod==='custom'?`<span style="display:flex;align-items:center;gap:6px">de <input class="t" type="date" id="pFrom" value="${painelFrom}" onchange="setPainelCustom()"> até <input class="t" type="date" id="pTo" value="${painelTo}" onchange="setPainelCustom()"></span>`:''}
+        <span class="empty-hint" style="margin:0">${painelPeriodLabel()}</span>
+      </div>
       <div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
         <div>
           <div class="cfg-dem-lbl">🎯 ROAS — faixas (x)</div>
@@ -1981,8 +1996,8 @@ function renderResultadosInner(){
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Investido</th><th>Conversas</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>ROAS</th><th>Custo/conv</th><th>Situação</th><th>✏️ Você define</th><th>Obs.</th></tr></thead>
-        <tbody>${body||'<tr><td colspan="11" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
+        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação</th><th>✏️ Você define</th><th>Obs.</th></tr></thead>
+        <tbody>${body||'<tr><td colspan="12" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
       </table>
     </div>`;
 }

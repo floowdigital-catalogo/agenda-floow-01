@@ -1899,7 +1899,8 @@ function resultCfg(){return {
   roasObs:Number(state.painelRoasObs)||8,                                    // de roasObs até roasExc = Bom; abaixo = Observação
   roasRuim:Number(state.painelRoasRuim)||6,                                  // abaixo disso = Ruim
   custoBom:(state.painelCustoBom!=null?Number(state.painelCustoBom):1.0),    // conversa abaixo disso = boa
-  custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5)  // conversa acima disso = cara
+  custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5), // conversa acima disso = cara
+  margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem%
 };}
 function resultAuto(m,cfg){
   if(!m)return 'sem';
@@ -1928,6 +1929,7 @@ function setPainelCfg(){
   state.painelRoasRuim=Number($('#pRoasRuim').value)||6;
   state.painelCustoBom=Number($('#pCustoBom').value)||1;
   state.painelCustoCaro=Number($('#pCustoCaro').value)||1.5;
+  state.painelMargem=Number($('#pMargem').value)||20;
   saveData();renderResultadosInner();
 }
 function refreshPainel(){painelLoaded=false;loadPainel();renderResultadosInner();}
@@ -1950,8 +1952,8 @@ function renderResultadosInner(){
     const custoV=(m&&Number(m.conversas)>0)?(Number(m.investido)||0)/Number(m.conversas):null;
     const cn=custoNivel(custoV,cfg);
     const cc=custoV!=null?`<span style="color:${cn.color};font-weight:600" title="${cn.label}">${fmtBRL(custoV)}</span>`:'—';
-    const lucroV=m?((Number(m.faturamento)||0)-(Number(m.investido)||0)):null;
-    const lucro=lucroV!=null?`<span style="color:${lucroV>=0?'#36d399':'#f2675c'};font-weight:600">${fmtBRL(lucroV)}</span>`:'—';
+    const lucroV=m?((Number(m.faturamento)||0)*(cfg.margem/100)):null;
+    const lucro=lucroV!=null?`<span style="color:#36d399;font-weight:600">${fmtBRL(lucroV)}</span>`:'—';
     return `<tr>
       <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
       <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
@@ -1987,6 +1989,10 @@ function renderResultadosInner(){
             🟢 abaixo de <input class="t" id="pCustoBom" type="number" min="0" step="0.1" style="width:74px" value="${cfg.custoBom}" onchange="setPainelCfg()">
             · 🔴 acima de <input class="t" id="pCustoCaro" type="number" min="0" step="0.1" style="width:74px" value="${cfg.custoCaro}" onchange="setPainelCfg()">
           </span>
+        </div>
+        <div>
+          <div class="cfg-dem-lbl">💰 Margem de lucro</div>
+          <span style="display:flex;align-items:center;gap:6px"><input class="t" id="pMargem" type="number" min="0" max="100" step="1" style="width:70px" value="${cfg.margem}" onchange="setPainelCfg()"><b>% do faturamento</b></span>
         </div>
         <div class="spacer"></div>
         <button class="btn ghost" onclick="refreshPainel()">🔄 Atualizar</button>

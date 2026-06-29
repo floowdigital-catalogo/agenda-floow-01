@@ -361,6 +361,10 @@
   .dl-actions{display:flex;gap:6px;flex:none}
   .dl-item.na .dl-label{opacity:.75;text-decoration:line-through;color:#B57BEE}
   .dl-btn.na-on{background:color-mix(in srgb,#B57BEE 22%,transparent);border-color:color-mix(in srgb,#B57BEE 55%,transparent);color:#cdaef7}
+  .dl-btn.dl-st-doing{background:color-mix(in srgb,#f5b400 20%,transparent);border-color:color-mix(in srgb,#f5b400 50%,transparent);color:#f5d36b}
+  .dl-btn.dl-st-feito{background:color-mix(in srgb,var(--ok) 18%,transparent);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
+  .dl-btn.dl-st-na{background:color-mix(in srgb,#B57BEE 22%,transparent);border-color:color-mix(in srgb,#B57BEE 55%,transparent);color:#cdaef7}
+  .dl-item.doing .dl-label{color:#f5d36b}
   /* resultados (painel geral) */
   .res-table{width:100%;border-collapse:collapse;font-size:13px}
   .res-table th,.res-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -369,6 +373,10 @@
   .res-cli{font-weight:600}
   .res-note{width:150px;font-size:12px;padding:5px 7px}
   .res-man{font-size:11px;cursor:default}
+  .opt-wk{text-align:center;font-size:15px;white-space:nowrap}
+  th.opt-wk{font-size:9.5px;color:var(--txt-faint)}
+  .opt-venc{color:var(--danger);font-weight:600;white-space:nowrap}
+  .opt-link{padding:4px 9px!important;font-size:12px!important;white-space:nowrap}
   /* financeiro */
   .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
   .fin-row:last-child{border-bottom:none}
@@ -1177,38 +1185,58 @@ function optAlertLevel(c){const n=nextOptDate(c);if(!n)return '';const t=new Dat
 function recomputeHealth(c){const sold=c.weekSold;if(sold===undefined||sold===null)return;c.health=sold?(c.prevWeekSold===true?'excelente':'bom'):(c.prevWeekSold===false?'ruim':'observacao');}
 function markSold(cid,sold){const c=clientById(cid);if(!c)return;const cur=iso(startOfWeek(new Date()));if(c.weekKey!==cur){c.prevWeekSold=c.weekSold;c.weekKey=cur;}c.weekSold=sold;recomputeHealth(c);touch(c);saveData();renderOptInner();}
 function setOptDate(cid,v){const c=clientById(cid);if(!c)return;c.optDate=v||'';touch(c);saveData();renderOptInner();}
-function setOptDaily(cid,v){const c=clientById(cid);if(!c)return;c.dailyValue=Number(v)||0;touch(c);saveData();renderOptInner();}
+function setOptDaily(cid,v){const c=clientById(cid);if(!c)return;c.dailyValue=Number(v)||0;touch(c);saveData();}
 function setOptNotes(cid,v){const c=clientById(cid);if(!c)return;c.optNotes=v;touch(c);saveData();}
-function renderOpt(app){app.insertAdjacentHTML('beforeend','<div id="optWrap"></div>');renderOptInner();}
+function setOptStatus(cid,v){const c=clientById(cid);if(!c)return;c.status=v;touch(c);saveData();renderOptInner();}
+function clientComercialUrl(c){const raw=c.code?painelMap()[String(c.code)]:null;return (raw&&raw.comercialUrl)||'';}
+function clientSituacaoRange(c,fromISO,toISO){ // situação automática do cliente numa semana específica
+  const raw=c.code?painelMap()[String(c.code)]:null;if(!raw)return 'sem';
+  const ok=d=>d&&d>=fromISO&&d<=toISO;let inv=0,conv=0,vendas=0,fat=0;
+  (Array.isArray(raw.semanas)?raw.semanas:[]).forEach(w=>{if(ok(w.d)){inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;}});
+  (Array.isArray(raw.vendas)?raw.vendas:[]).forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
+  return resultAuto({investido:inv,conversas:conv,vendas:vendas,faturamento:fat},resultCfg());
+}
+function renderOpt(app){app.insertAdjacentHTML('beforeend','<div id="optWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();renderOptInner();}
 function renderOptInner(){
   const wrap=$('#optWrap');if(!wrap)return;
   const cs=state.clients.slice().filter(c=>c.status!=='arquivado').sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   const ativos=state.clients.filter(c=>c.status==='ativo').length;
   const vencidas=cs.filter(c=>optAlertLevel(c)==='red').length, proximas=cs.filter(c=>optAlertLevel(c)==='yellow').length;
   const fmtD=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
-  const cards=cs.map(c=>{
-    const hl=resultMeta(clientSituacao(c));const al=optAlertLevel(c);const nx=nextOptDate(c);
-    const chip=al==='red'?'<span class="opt-chip red">vencida</span>':al==='yellow'?'<span class="opt-chip yellow">em breve</span>':'';
-    return `<div class="opt-card" style="border-top:3px solid ${hl.color}">
-      <div class="opt-top">
-        <span class="opt-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
-        <span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span>
-      </div>
-      <div class="opt-grid">
-        <label class="opt-f"><span>Última otimização</span><input class="t" type="date" value="${c.optDate||''}" onchange="setOptDate('${c.id}',this.value)"></label>
-        <label class="opt-f"><span>Próxima otimização</span><div class="opt-next ${al}">${nx?fmtD(nx):'—'} ${chip}</div></label>
-      </div>
-      <label class="opt-f" style="margin-top:10px"><span>O que foi feito / observações</span>
-        <textarea class="t" placeholder="Descreva o que foi feito na otimização ou alguma observação…" onchange="setOptNotes('${c.id}',this.value)" style="min-height:56px;font-size:13px">${esc(c.optNotes||'')}</textarea></label>
-    </div>`;}).join('');
+  // últimas 4 semanas (segunda→domingo), da mais antiga p/ a atual
+  const hoje=new Date(), weeks=[];
+  for(let k=3;k>=0;k--){const mon=startOfWeek(hoje);mon.setDate(mon.getDate()-7*k);const fri=new Date(mon);fri.setDate(mon.getDate()+4);const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+    weeks.push({from:iso(mon),to:iso(sun),label:`${pad(mon.getDate())}/${pad(mon.getMonth()+1)}–${pad(fri.getDate())}/${pad(fri.getMonth()+1)}`});}
+  const rows=cs.map(c=>{
+    const al=optAlertLevel(c);const nx=nextOptDate(c);
+    const prox=al==='red'?`<span class="opt-venc">${nx?fmtD(nx):'—'} ⚠</span>`:`${nx?fmtD(nx):'—'}`;
+    const wcells=weeks.map(w=>{const m=resultMeta(clientSituacaoRange(c,w.from,w.to));return `<td class="opt-wk" title="${w.label}: ${m.label}">${m.em}</td>`;}).join('');
+    const url=clientComercialUrl(c);
+    const link=url?`<a class="btn ghost opt-link" href="${esc(url)}" target="_blank" rel="noopener">Comercial ↗</a>`:'<span style="color:var(--txt-faint)">—</span>';
+    const stSel=`<select class="filter" onchange="setOptStatus('${c.id}',this.value)">${[['ativo','🟢 Ativo'],['pausado','⏸ Pausado']].map(o=>`<option value="${o[0]}" ${c.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>`;
+    return `<tr>
+      <td class="res-cli">${c.code?`<span class="ccode">#${esc(c.code)}</span> `:''}${esc(c.name)}</td>
+      <td><span style="display:flex;align-items:center;gap:3px"><b>R$</b><input class="t res-note" style="width:72px" type="number" min="0" step="1" value="${c.dailyValue||''}" placeholder="0" onchange="setOptDaily('${c.id}',this.value)"></span></td>
+      <td><input class="t" style="width:140px" type="date" value="${c.optDate||''}" onchange="setOptDate('${c.id}',this.value)"></td>
+      <td>${prox}</td>
+      ${wcells}
+      <td>${stSel}</td>
+      <td>${link}</td>
+      <td><input class="t res-note" value="${esc(c.optNotes||'')}" placeholder="o que foi feito…" onchange="setOptNotes('${c.id}',this.value)"></td>
+    </tr>`;}).join('');
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:14px">
       <div class="metric"><div class="mv">${ativos}</div><div class="ml">Clientes ativos</div></div>
       <div class="metric ${vencidas?'alert':''}"><div class="mv">${vencidas}</div><div class="ml">🔴 Otimizações vencidas</div></div>
       <div class="metric"><div class="mv">${proximas}</div><div class="ml">🟡 Próximas (1-2 dias)</div></div>
     </div>
-    <div class="empty-hint" style="margin:-4px 0 12px">A próxima otimização é 7 dias após a última. A <b>situação</b> (🟢🔵🟡🔴) é automática pelos resultados — veja e ajuste na aba <b>📊 Resultados</b>.</div>
-    <div class="opt-grid-wrap">${cards||'<div class="empty-state">Nenhum cliente.</div>'}</div>`;
+    <div class="empty-hint" style="margin:-4px 0 12px">As 4 semanas mostram a <b>tendência</b> (🟢 Excelente · 🔵 Bom · 🟡 Observação · 🔴 Ruim) — calculada sozinha pelos resultados. A próxima otimização é 7 dias após a última.</div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="res-table">
+        <thead><tr><th>Cliente</th><th>Valor diário</th><th>Última otim.</th><th>Próxima otim.</th>${weeks.map(w=>`<th class="opt-wk">${w.label}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="${7+weeks.length}" class="empty-hint">Nenhum cliente.</td></tr>`}</tbody>
+      </table>
+    </div>`;
 }
 
 /* ---------- horas trabalhadas (admin) ---------- */
@@ -1291,12 +1319,11 @@ function renderDeliverGrid(){
   const grid=document.createElement('div');grid.className='deliver-grid';
   grid.innerHTML=list.map(c=>{
     const done=deliverDone(c),na=deliverNA(c),eff=deliverTotal(c),pct=eff>0?Math.round(done/eff*100):100;
-    const items=CHECK_().map(i=>{const v=c.checklist&&c.checklist[i.id];const ok=v===true,naItem=v==='na';
-      return `<div class="dl-item ${ok?'ok':''} ${naItem?'na':''}">
-        <span class="dl-label">${ok?'✔':naItem?'⊘':'○'} ${esc(i.label)}</span>
+    const items=CHECK_().map(i=>{const st=dlState(c.checklist&&c.checklist[i.id]);const m=DL_STATES[st];
+      return `<div class="dl-item ${st==='feito'?'ok':''} ${st==='na'?'na':''} ${st==='doing'?'doing':''}">
+        <span class="dl-label">${m.icon} ${esc(i.label)}</span>
         <div class="dl-actions">
-          <button class="dl-btn ${naItem?'na-on':''}" onclick="toggleDeliverNA('${c.id}','${i.id}')" title="Não precisa fazer">${naItem?'Não precisa':'N/A'}</button>
-          <button class="dl-btn ${ok?'ok':''}" onclick="toggleDeliverable('${c.id}','${i.id}')">${ok?'Entregue':'Entregar'}</button>
+          <button class="dl-btn dl-st-${st}" onclick="cycleDeliverable('${c.id}','${i.id}')" title="Clique para avançar: A fazer → Fazendo → Feito → Não precisa">${m.label}</button>
         </div>
       </div>`;}).join('');
     return `<div class="dcard ${deliverComplete(c)?'complete':''}">
@@ -1306,8 +1333,12 @@ function renderDeliverGrid(){
   }).join('');
   wrap.innerHTML='';wrap.appendChild(grid);
 }
-function toggleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=(c.checklist[iid]===true)?false:true;touch(c);saveData();renderDeliverGrid();}
-function toggleDeliverNA(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);c.checklist[iid]=(c.checklist[iid]==='na')?false:'na';touch(c);saveData();renderDeliverGrid();}
+const DL_STATES={todo:{label:'A fazer',icon:'○'},doing:{label:'Fazendo',icon:'◐'},feito:{label:'Feito',icon:'✔'},na:{label:'Não precisa',icon:'⊘'}};
+function dlState(v){return v===true?'feito':v==='doing'?'doing':v==='na'?'na':'todo';}
+function cycleDeliverable(cid,iid){const c=clientById(cid);if(!c)return;ensureChecklist(c);
+  const v=c.checklist[iid];
+  c.checklist[iid]=(v===false||v===undefined||v===null)?'doing':(v==='doing')?true:(v===true)?'na':false; // A fazer→Fazendo→Feito→Não precisa→A fazer
+  touch(c);saveData();renderDeliverGrid();}
 
 /* ---------- calendar tab ---------- */
 function renderCal(app){

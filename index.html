@@ -365,6 +365,11 @@
   .dl-btn.dl-st-feito{background:color-mix(in srgb,var(--ok) 18%,transparent);border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}
   .dl-btn.dl-st-na{background:color-mix(in srgb,#B57BEE 22%,transparent);border-color:color-mix(in srgb,#B57BEE 55%,transparent);color:#cdaef7}
   .dl-item.doing .dl-label{color:#f5d36b}
+  .prio-row{display:flex;gap:8px;flex-wrap:wrap}
+  .prio-btn{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--txt-dim);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600}
+  .prio-btn .prio-dot{width:11px;height:11px;border-radius:50%}
+  .prio-btn.on{border-color:var(--txt-faint);color:var(--txt);background:var(--surface-2)}
+  .prio-tag{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none;vertical-align:middle}
   /* resultados (painel geral) */
   .res-table{width:100%;border-collapse:collapse;font-size:13px}
   .res-table th,.res-table td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -563,6 +568,14 @@
     </div>
     <label class="f">Responsável</label>
     <div class="respgrid" id="fResps"></div>
+    <label class="f">Prioridade</label>
+    <div class="prio-row" id="fPrio">
+      <button type="button" class="prio-btn" data-p="red" onclick="pickPrio('red')"><span class="prio-dot" style="background:#f2675c"></span> Urgente</button>
+      <button type="button" class="prio-btn" data-p="yellow" onclick="pickPrio('yellow')"><span class="prio-dot" style="background:#f5b400"></span> Importante</button>
+      <button type="button" class="prio-btn" data-p="green" onclick="pickPrio('green')"><span class="prio-dot" style="background:#36d399"></span> Tranquilo</button>
+    </div>
+    <label class="f">📝 Observação</label>
+    <textarea class="t" id="fObs" placeholder="Alguma informação sobre a tarefa…" style="min-height:52px;font-size:13px"></textarea>
     <div class="donetoggle" id="fDone" onclick="toggleDone()"><span class="box" id="fDoneBox"></span> Marcar como concluído</div>
     <div class="modal-actions">
       <button class="btn del" id="evDel" onclick="deleteEv()" style="display:none">Excluir</button>
@@ -610,9 +623,13 @@
 <!-- Copy modal -->
 <div class="scrim" id="copyScrim">
   <div class="modal">
-    <h2>Copiar agenda <span class="x" onclick="closeCopy()">&times;</span></h2>
+    <h2>Copiar / Relatório <span class="x" onclick="closeCopy()">&times;</span></h2>
     <label class="f">Cliente</label>
     <select class="t" id="copyClient" onchange="renderCopy()"></select>
+    <div class="seg" style="margin-top:12px">
+      <button id="copyModeAg" class="on" onclick="setCopyMode('agenda')">📅 Agenda</button>
+      <button id="copyModeRep" onclick="setCopyMode('report')">📋 Relatório da semana</button>
+    </div>
     <label class="f" style="margin-top:14px">Pré-visualização <span style="text-transform:none;color:var(--txt-faint)">(formato WhatsApp)</span></label>
     <div class="copybox" id="copyBox"></div>
     <div class="modal-actions"><button class="btn ghost" onclick="closeCopy()">Fechar</button><button class="btn primary" onclick="doCopy()">Copiar texto</button></div>
@@ -733,7 +750,11 @@ let view='day';
 let cursor=new Date();
 let hoursWeek=new Date();
 let hoursView='week'; // 'day' | 'week' | 'month' no relatório de Horas
-let editingId=null, draftType='outro', draftResp=null, draftDone=false;
+let editingId=null, draftType='outro', draftResp=null, draftDone=false, draftPrio='';
+const PRIO={red:{label:'Urgente',color:'#f2675c'},yellow:{label:'Importante',color:'#f5b400'},green:{label:'Tranquilo',color:'#36d399'}};
+function pickPrio(p){draftPrio=(draftPrio===p)?'':p;renderPrio();}
+function renderPrio(){document.querySelectorAll('#fPrio .prio-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===draftPrio));}
+function prioDot(ev){const p=ev&&ev.priority;return p&&PRIO[p]?`<span class="prio-tag" style="background:${PRIO[p].color}" title="${PRIO[p].label}"></span> `:'';}
 let fClient='', fResp='';            // calendar filters
 const isAdmin=()=>!!(currentUser&&currentUser.isAdmin);
 const isCS=()=>!!(currentUser&&currentUser.isCS&&!currentUser.isAdmin); // Customer Success: gerencia, mas SEM Financeiro/Config/Horas
@@ -1279,7 +1300,7 @@ function renderTasks(app){
   const today=iso(new Date());
   const byDate=(a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||''));
   const itemHtml=(e,over)=>{const d=parseISO(e.date);const dd=`${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
-    return `<div class="tk${over?' over':''}" onclick="openEv('${e.id}')"><span class="tk-d">${over?'⚠ ':''}${dd}${fmtRange(e)?' · '+fmtRange(e):''}</span><span class="tk-t">${typeOf(e.type).em} ${esc(e.title)}<span class="tk-c"> · ${esc(clientName(e.clientId))}</span></span></div>`;};
+    return `<div class="tk${over?' over':''}" onclick="openEv('${e.id}')"><span class="tk-d">${over?'⚠ ':''}${dd}${fmtRange(e)?' · '+fmtRange(e):''}</span><span class="tk-t">${prioDot(e)}${typeOf(e.type).em} ${esc(e.title)}<span class="tk-c"> · ${esc(clientName(e.clientId))}</span></span></div>`;};
   const members=canManage()?state.users:state.users.filter(m=>m.id===myMember());
   let totalOver=0;members.forEach(m=>{totalOver+=state.events.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;});
   const head=`<div class="list-head">${canManage()?'Tarefas por usuário':'Suas tarefas'} · <b class="${totalOver?'bad':''}">${totalOver} atrasada${totalOver===1?'':'s'}</b></div>`;
@@ -1391,7 +1412,7 @@ function renderMonth(app){
     cell.onclick=e=>{if(e.target===cell||e.target.classList.contains('dnum'))openEv(null,iso(d));};
     let h=`<div class="dnum">${d.getDate()}</div>`;
     evs.slice(0,3).forEach(ev=>{const c=respColor(ev.resp);
-      h+=`<div class="ev${ev.done?' done':''}" style="--c:${c}" onclick="event.stopPropagation();openEv('${ev.id}')">${ev.time?`<span class="ti">${ev.time}</span>`:''}<span class="tx">${typeOf(ev.type).em} ${esc(ev.title)}</span></div>`;});
+      h+=`<div class="ev${ev.done?' done':''}" style="--c:${c}" onclick="event.stopPropagation();openEv('${ev.id}')">${ev.time?`<span class="ti">${ev.time}</span>`:''}<span class="tx">${prioDot(ev)}${typeOf(ev.type).em} ${esc(ev.title)}</span></div>`;});
     if(evs.length>3)h+=`<div class="more">+${evs.length-3} mais</div>`;
     cell.innerHTML=h;grid.appendChild(cell);
   }
@@ -1425,7 +1446,7 @@ function renderDay(app){
   const untimed=evs.filter(e=>!e.time);
   if(untimed.length){
     const u=document.createElement('div');u.className='untimed';
-    u.innerHTML=`<span class="ut-lbl">Sem horário</span>`+untimed.map(x=>{const c=respColor(x.resp);return `<span class="ut-chip${x.done?' done':''}" style="--c:${c}" onclick="openEv('${x.id}')">${typeOf(x.type).em} ${esc(x.title)} · ${esc(clientName(x.clientId))}</span>`;}).join('');
+    u.innerHTML=`<span class="ut-lbl">Sem horário</span>`+untimed.map(x=>{const c=respColor(x.resp);return `<span class="ut-chip${x.done?' done':''}" style="--c:${c}" onclick="openEv('${x.id}')">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)} · ${esc(clientName(x.clientId))}</span>`;}).join('');
     app.appendChild(u);
   }
 
@@ -1455,7 +1476,7 @@ function renderDay(app){
     blk.className='dblk'+(x.done?' done':'');
     blk.style.cssText=`--c:${c};top:${top}px;height:${height}px;left:${left};width:${w}`;
     blk.onclick=ev=>{ev.stopPropagation();openEv(x.id);};
-    blk.innerHTML=`<div class="db-t">${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}${x.loc?' · 📍'+esc(x.loc):''}</div><div class="db-r">${esc(respName(x.resp))}</div>`;
+    blk.innerHTML=`<div class="db-t">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}${x.loc?' · 📍'+esc(x.loc):''}${x.obs?' · 📝'+esc(x.obs):''}</div><div class="db-r">${esc(respName(x.resp))}</div>`;
     grid.appendChild(blk);
   });
   if(today){
@@ -1646,7 +1667,7 @@ function renderTimeline(){
   tl.innerHTML=evs.map(ev=>{const d=parseISO(ev.date);const c=respColor(ev.resp);
     return `<div class="tl${ev.done?' done':''}" style="--c:${c}" onclick="closeClient();openEv('${ev.id}')">
       <div class="tl-d"><div class="tl-day">${d.getDate()}</div><div class="tl-mo">${MONTHS_S[d.getMonth()]}</div></div>
-      <div class="tl-body"><div class="tl-t">${typeOf(ev.type).em} ${esc(ev.title)} ${ev.done?'✓':''}</div>
+      <div class="tl-body"><div class="tl-t">${prioDot(ev)}${typeOf(ev.type).em} ${esc(ev.title)} ${ev.done?'✓':''}</div>
       <div class="tl-sub">${respName(ev.resp)}${fmtRange(ev)?' · '+fmtRange(ev):''}${ev.loc?' · '+esc(ev.loc):''}</div></div></div>`;}).join('');
 }
 function addTaskForClient(){const c=clientById(openClientId);closeClient();openEv(null,null,c?c.name:'');}
@@ -1697,12 +1718,15 @@ function openEv(id,presetDate,presetClient){
   $('#fTime').value=ev?ev.time:'';
   $('#fEnd').value=ev?(ev.end||''):'';
   $('#fLoc').value=ev?(ev.loc||''):'';
+  $('#fObs').value=ev?(ev.obs||''):'';
   draftType=ev?ev.type:(state.types[0]&&state.types[0].id);
   const dl=respForDemand(draftType);
   draftResp=ev?ev.resp:(dl[0]?dl[0].id:(state.users[0]&&state.users[0].id));
   draftDone=ev?!!ev.done:false;
-  renderTypeBtns();renderRespBtns();renderDoneToggle();updateDurHint();updateLocField();
-  ['fClient','fDate','fTime','fEnd','fLoc'].forEach(idf=>$('#'+idf).disabled=ro);
+  draftPrio=ev?(ev.priority||''):'';
+  renderTypeBtns();renderRespBtns();renderDoneToggle();renderPrio();updateDurHint();updateLocField();
+  ['fClient','fDate','fTime','fEnd','fLoc','fObs'].forEach(idf=>$('#'+idf).disabled=ro);
+  $('#fPrio').style.pointerEvents=ro?'none':'';$('#fPrio').style.opacity=ro?'.6':'';
   $('#fTypes').style.pointerEvents=ro?'none':'';$('#fTypes').style.opacity=ro?'.6':'';
   $('#fResps').style.pointerEvents=ro?'none':'';$('#fResps').style.opacity=ro?'.6':'';
   $('#evDel').style.display=(id&&canManage())?'block':'none';
@@ -1738,7 +1762,7 @@ function saveEv(){
   }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
   const title=typeOf(draftType).label;
-  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',resp:draftResp,done:draftDone};
+  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim()};
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}
@@ -1856,12 +1880,40 @@ function saveConfig(){
 }
 
 /* ---------- copy / whatsapp ---------- */
+let copyMode='agenda';
 function openCopy(presetId){
   const cl=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt'));
   $('#copyClient').innerHTML=cl.map(c=>`<option value="${c.id}" ${c.id===presetId?'selected':''}>${esc(c.name)}</option>`).join('')||`<option value="">— nenhum —</option>`;
-  renderCopy();$('#copyScrim').classList.add('on');
+  setCopyMode('agenda');$('#copyScrim').classList.add('on');
 }
+function setCopyMode(m){copyMode=m;const a=$('#copyModeAg'),r=$('#copyModeRep');if(a)a.classList.toggle('on',m==='agenda');if(r)r.classList.toggle('on',m==='report');renderCopy();}
 function closeCopy(){$('#copyScrim').classList.remove('on');}
+/* soma investido/conversas/vendas de um cliente num intervalo (pro relatório) */
+function aggClientRange(code,fromISO,toISO){const raw=code?painelMap()[String(code)]:null;if(!raw)return null;
+  const ok=d=>d&&d>=fromISO&&d<=toISO;let inv=0,conv=0,vendas=0,fat=0;
+  (Array.isArray(raw.semanas)?raw.semanas:[]).forEach(w=>{if(ok(w.d)){inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;}});
+  (Array.isArray(raw.vendas)?raw.vendas:[]).forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
+  return {investido:inv,conversas:conv,vendas:vendas,faturamento:fat};}
+function buildWeekReport(cid){
+  if(!cid)return 'Escolha um cliente.';
+  const s=startOfWeek(new Date()),e=new Date(s);e.setDate(s.getDate()+6);
+  const from=iso(s),to=iso(e);
+  const done=state.events.filter(ev=>ev.clientId===cid&&ev.done&&ev.date>=from&&ev.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
+  let out=`📊 *FLOOW Digital* — ${clientName(cid)}\n📅 Resumo da semana (${pad(s.getDate())}/${pad(s.getMonth()+1)} a ${pad(e.getDate())}/${pad(e.getMonth()+1)})\n`;
+  out+=`\n✅ *O que fizemos essa semana:*\n`;
+  if(done.length)done.forEach(ev=>{out+=`• ${typeOf(ev.type).em} ${ev.title}${ev.obs?` — ${ev.obs}`:''}\n`;});
+  else out+=`• _(nenhuma tarefa concluída registrada essa semana)_\n`;
+  const c=clientById(cid),m=c?aggClientRange(c.code,from,to):null;
+  if(m&&(m.investido||m.conversas||m.vendas)){
+    out+=`\n📈 *Resultados:*\n`;
+    if(m.investido)out+=`• Investimento: ${fmtBRL(m.investido)}\n`;
+    out+=`• Conversas iniciadas: ${m.conversas}\n`;
+    if(m.vendas)out+=`• Vendas: ${m.vendas}\n`;
+  }
+  out+=`\n_Qualquer dúvida, estamos à disposição! 🚀_`;
+  return out.trim();
+}
+function currentCopyText(){return copyMode==='report'?buildWeekReport($('#copyClient').value):buildCopyText();}
 function buildCopyText(){
   const cid=$('#copyClient').value;if(!cid)return 'Cadastre uma entrega primeiro.';
   const evs=state.events.filter(e=>e.clientId===cid).sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
@@ -1880,8 +1932,8 @@ function buildCopyText(){
   });
   return out.trim();
 }
-function renderCopy(){$('#copyBox').textContent=buildCopyText();}
-function doCopy(){const txt=buildCopyText();const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copiado! Cole no WhatsApp 📋');}catch(e){toast('Selecione e copie');}document.body.removeChild(ta);}
+function renderCopy(){$('#copyBox').textContent=currentCopyText();}
+function doCopy(){const txt=currentCopyText();const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copiado! Cole no WhatsApp 📋');}catch(e){toast('Selecione e copie');}document.body.removeChild(ta);}
 
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
 

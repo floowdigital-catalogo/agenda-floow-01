@@ -273,6 +273,33 @@
   .dblk .db-r{font-size:10px;color:var(--c);font-weight:700;margin-top:2px}
   .nowline{position:absolute;left:50px;right:0;height:2px;background:var(--danger);z-index:5}
   .nowline::before{content:"";position:absolute;left:-6px;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--danger)}
+  /* grade de semana (estilo Google Calendar) */
+  .wg-scroll{overflow-x:auto;border:1px solid var(--line-soft);border-radius:12px;background:var(--ink-2)}
+  .wg{min-width:760px}
+  .wg-head,.wg-utrow{display:grid;grid-template-columns:52px repeat(7,1fr)}
+  .wg-cnr{border-right:1px solid var(--line-soft)}
+  .wg-cnr.sm{font-size:8.5px;color:var(--txt-faint);text-transform:uppercase;text-align:center;align-self:center;line-height:1.1}
+  .wg-dh{text-align:center;padding:8px 2px;border-left:1px solid var(--line-soft)}
+  .wg-dow{display:block;font-size:10.5px;color:var(--txt-faint);text-transform:uppercase;letter-spacing:.05em}
+  .wg-dn{display:block;font-family:'Bricolage Grotesque';font-weight:700;font-size:20px;line-height:1.15}
+  .wg-dh.today .wg-dn{color:var(--brand)}
+  .wg-utrow{border-top:1px solid var(--line-soft)}
+  .wg-ut{border-left:1px solid var(--line-soft);padding:3px;display:flex;flex-wrap:wrap;gap:3px;min-height:24px}
+  .wg-utc{font-size:10.5px;padding:2px 6px;border-radius:6px;border-left:2px solid var(--c);background:color-mix(in srgb,var(--c) 20%,#101010 80%);color:var(--txt);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .wg-utc.done{opacity:.5;text-decoration:line-through}
+  .wg-body{display:grid;grid-template-columns:52px repeat(7,1fr);position:relative;max-height:62vh;overflow-y:auto;border-top:1px solid var(--line-soft)}
+  .wg-gut{position:relative;border-right:1px solid var(--line-soft)}
+  .wg-hl{position:absolute;right:5px;transform:translateY(-6px);font-size:10px;color:var(--txt-faint)}
+  .wg-col{position:relative;border-left:1px solid var(--line-soft);cursor:pointer}
+  .wg-col.today{background:color-mix(in srgb,var(--brand) 6%,transparent)}
+  .wg-gl{position:absolute;left:0;right:0;border-top:1px solid var(--line-soft);opacity:.55}
+  .wg-ev{position:absolute;border-radius:7px;border-left:3px solid var(--c);background:color-mix(in srgb,var(--c) 24%,#101010 76%);padding:3px 6px;overflow:hidden;cursor:pointer;box-shadow:0 3px 10px -6px rgba(0,0,0,.7);transition:.12s}
+  .wg-ev:hover{background:color-mix(in srgb,var(--c) 36%,#101010 64%);z-index:6}
+  .wg-ev.done{opacity:.5}.wg-ev.done .wg-en{text-decoration:line-through}
+  .wg-et{display:block;font-size:9.5px;color:var(--c);font-weight:700;line-height:1.1}
+  .wg-en{display:block;font-size:11px;font-weight:600;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wg-now{position:absolute;left:0;right:0;height:2px;background:var(--danger);z-index:5}
+  .wg-now::before{content:"";position:absolute;left:-4px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--danger)}
 
   /* list view */
   .list-head{font-size:13.5px;color:var(--txt-dim);margin-bottom:12px}
@@ -1419,16 +1446,48 @@ function renderMonth(app){
   app.appendChild(grid);
 }
 function renderWeek(app){
-  const wk=document.createElement('div');wk.className='week';const start=startOfWeek(cursor);const today=new Date();
-  for(let i=0;i<7;i++){
-    const d=new Date(start);d.setDate(start.getDate()+i);const evs=eventsOn(d);const load=loadLabel(d);
-    const row=document.createElement('div');row.className='wday'+(sameDay(d,today)?' today':'');
-    row.onclick=e=>{if(e.currentTarget===e.target||e.target.classList.contains('wd-evs')||e.target.classList.contains('empty'))openEv(null,iso(d));};
-    const ev=evs.length?evs.map(x=>{const c=respColor(x.resp);return `<div class="wrow${x.done?' done':''}" style="--c:${c}" onclick="event.stopPropagation();openEv('${x.id}')"><span class="wr-time">${fmtRange(x)||'—'}</span><span class="wr-title">${typeOf(x.type).em} ${esc(x.title)} · ${esc(clientName(x.clientId))}</span><span class="tag">${esc(respName(x.resp))}</span></div>`;}).join(''):`<div class="empty">Sem entregas — toque para adicionar</div>`;
-    row.innerHTML=`<div class="wd-date"><div class="wd-dow">${DOW[d.getDay()]}</div><div class="wd-num">${d.getDate()}</div>${load?`<div class="wd-load">${load}</div>`:''}</div><div class="wd-evs">${ev}</div>`;
-    wk.appendChild(row);
-  }
-  app.appendChild(wk);
+  const start=startOfWeek(cursor), today=new Date();
+  const days=[];for(let i=0;i<7;i++){const d=new Date(start);d.setDate(start.getDate()+i);days.push(d);}
+  // faixa de horas: auto-ajusta aos eventos (padrão 8h–19h, com 1h de folga)
+  let minH=8,maxH=19;
+  days.forEach(d=>eventsOn(d).forEach(e=>{const s=toMin(e.time);if(s==null)return;let en=toMin(e.end);if(en==null||en<=s)en=s+45;minH=Math.min(minH,Math.floor(s/60));maxH=Math.max(maxH,Math.ceil(en/60));}));
+  const START=Math.max(0,minH-1), END=Math.min(24,maxH+1), HPX=54, H=(END-START)*HPX;
+  let head=`<div class="wg-cnr"></div>`;
+  days.forEach(d=>{head+=`<div class="wg-dh${sameDay(d,today)?' today':''}"><span class="wg-dow">${DOW[d.getDay()]}</span><span class="wg-dn">${d.getDate()}</span></div>`;});
+  let anyUnt=false,unt=`<div class="wg-cnr sm">sem<br>hora</div>`;
+  days.forEach(d=>{const us=eventsOn(d).filter(e=>toMin(e.time)==null);if(us.length)anyUnt=true;
+    unt+=`<div class="wg-ut">${us.map(x=>{const c=respColor(x.resp);return `<span class="wg-utc${x.done?' done':''}" style="--c:${c}" onclick="openEv('${x.id}')" title="${esc(x.title)} · ${esc(clientName(x.clientId))}">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)}</span>`;}).join('')}</div>`;});
+  let gut='';for(let h=START;h<=END;h++)gut+=`<div class="wg-hl" style="top:${(h-START)*HPX}px">${h<24?pad(h)+':00':''}</div>`;
+  let cols='';
+  days.forEach(d=>{
+    const timed=eventsOn(d).filter(e=>toMin(e.time)!=null).sort((a,b)=>toMin(a.time)-toMin(b.time));
+    const L=packLanes(timed);
+    let lines='';for(let h=START;h<=END;h++)lines+=`<div class="wg-gl" style="top:${(h-START)*HPX}px"></div>`;
+    let blk='';
+    timed.forEach(x=>{
+      const s=toMin(x.time);let en=toMin(x.end);if(en==null||en<=s)en=s+45;
+      const top=(s-START*60)/60*HPX, height=Math.max((en-s)/60*HPX-2,20);
+      const lane=L.lane[x.id],nc=L.cols[x.id],w=100/nc,left=lane*w,c=respColor(x.resp);
+      blk+=`<div class="wg-ev${x.done?' done':''}" style="--c:${c};top:${top}px;height:${height}px;left:calc(${left}% + 1px);width:calc(${w}% - 3px)" onclick="event.stopPropagation();openEv('${x.id}')"><span class="wg-et">${fmtRange(x)||''}</span><span class="wg-en">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)}</span></div>`;
+    });
+    let now='';if(sameDay(d,today)){const nm=today.getHours()*60+today.getMinutes();if(nm>=START*60&&nm<=END*60)now=`<div class="wg-now" style="top:${(nm-START*60)/60*HPX}px"></div>`;}
+    cols+=`<div class="wg-col${sameDay(d,today)?' today':''}" style="height:${H}px" onclick="wgClick(event,'${iso(d)}',${START},${HPX})">${lines}${blk}${now}</div>`;
+  });
+  app.insertAdjacentHTML('beforeend',`
+    <div class="wg-scroll"><div class="wg">
+      <div class="wg-head">${head}</div>
+      ${anyUnt?`<div class="wg-utrow">${unt}</div>`:''}
+      <div class="wg-body">
+        <div class="wg-gut" style="height:${H}px">${gut}</div>
+        ${cols}
+      </div>
+    </div></div>`);
+  const body=app.querySelector('.wg-body');if(body)setTimeout(()=>{body.scrollTop=Math.max(0,(9-START)*HPX-HPX);},0);
+}
+function wgClick(e,dateIso,START,HPX){
+  if(!e.target.classList.contains('wg-col'))return;
+  const h=Math.min(23,START+Math.floor(e.offsetY/HPX));
+  openEv(null,dateIso);setTimeout(()=>{const t=$('#fTime');if(t){t.value=`${pad(h)}:00`;autoEnd();}},30);
 }
 
 /* ---------- DAY view (Google-Calendar-style timeline) ---------- */

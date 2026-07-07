@@ -27,7 +27,30 @@
       radial-gradient(900px 520px at 88% -10%, rgba(245,180,0,.13), transparent 60%),
       radial-gradient(680px 480px at -6% 112%, rgba(245,180,0,.05), transparent 55%),
       var(--ink);
-    padding:22px clamp(12px,3vw,34px) 80px;}
+    padding:0;}
+  /* ===== layout sidebar (estilo floow) ===== */
+  .shell{display:flex;min-height:100vh}
+  .side{width:236px;flex:none;background:var(--ink-2);border-right:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;z-index:40}
+  .side-brand{display:flex;align-items:center;gap:11px;padding:4px 6px 14px}
+  .side-nav{display:flex;flex-direction:column;gap:3px}
+  .snav{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;color:var(--txt-dim);font-size:14px;font-weight:600;text-align:left;width:100%;transition:.12s}
+  .snav:hover{background:var(--surface);color:var(--txt)}
+  .snav.on{background:color-mix(in srgb,var(--brand) 16%,transparent);color:var(--txt)}
+  .snav-ic{font-size:16px;flex:none;width:20px;text-align:center}
+  .snav-tx{flex:1}
+  .snav-badge{background:var(--surface);border-radius:20px;padding:1px 8px;font-size:11px;font-weight:700;color:var(--txt-dim)}
+  .snav.on .snav-badge{background:color-mix(in srgb,var(--brand) 32%,transparent);color:var(--txt)}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;padding:0 clamp(14px,2.6vw,34px) 70px}
+  .topbar{display:flex;align-items:center;gap:12px;padding:16px 0 14px;position:sticky;top:0;z-index:30;background:linear-gradient(var(--ink) 72%,transparent)}
+  .side-btn{display:none;font-size:22px;color:var(--txt);padding:2px 8px;line-height:1}
+  .side-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:35}
+  body:not(.logged) .side,body:not(.logged) .topbar{display:none}
+  body:not(.logged) .main{padding:0}
+  @media(max-width:860px){
+    .side{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow)}
+    .side.open{transform:translateX(0)}
+    .side-btn{display:block}
+  }
   h1,h2,h3{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
   ::-webkit-scrollbar{height:9px;width:9px}
@@ -556,22 +579,31 @@
 </head>
 <body>
 
-<header class="app">
-  <div class="brand">
-    <div class="mark">
-      <svg viewBox="0 0 80 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M40 30 C40 14 20 14 20 30 C20 46 40 46 40 30 C40 14 60 14 60 30 C60 46 40 46 40 30 Z" stroke="#f5b400" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+<div class="shell">
+  <aside class="side" id="side">
+    <div class="side-brand">
+      <div class="mark">
+        <svg viewBox="0 0 80 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M40 30 C40 14 20 14 20 30 C20 46 40 46 40 30 C40 14 60 14 60 30 C60 46 40 46 40 30 Z" stroke="#f5b400" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="name"><b>FLOOW</b> digital</div>
+        <div class="sub">Gestão · equipe</div>
+      </div>
     </div>
-    <div>
-      <div class="name"><b>FLOOW</b> digital</div>
-      <div class="sub">Gestão · equipe</div>
+    <nav class="side-nav" id="sideNav"></nav>
+  </aside>
+  <div class="side-ov" id="sideOv" onclick="toggleSide(false)"></div>
+  <main class="main">
+    <div class="topbar">
+      <button class="side-btn" onclick="toggleSide()" aria-label="Menu">☰</button>
+      <div style="flex:1"></div>
+      <div class="user-chip" id="userChip"></div>
     </div>
-  </div>
-  <div class="user-chip" id="userChip"></div>
-</header>
-
-<div id="app"><div class="loading"><div class="spin"></div>Carregando a gestão da equipe…</div></div>
+    <div id="app"><div class="loading"><div class="spin"></div>Carregando a gestão da equipe…</div></div>
+  </main>
+</div>
 
 <!-- Event modal -->
 <div class="scrim" id="evScrim">
@@ -978,6 +1010,7 @@ function clientNext(id){
 
 /* ---------- render shell ---------- */
 function render(){
+  document.body.classList.toggle('logged',!!currentUser);
   if(!currentUser){renderLogin();return;}
   if(canManage()&&!painelLoaded&&!painelLoading)loadPainel(); // carrega a situação (aba Resultados) p/ Painel/Otimizações
   renderUserChip();
@@ -989,23 +1022,16 @@ function render(){
     }
   }
   const app=$('#app');app.innerHTML='';
-  const nav=document.createElement('div');nav.className='tabs';
+  const side=$('#sideNav');
+  const item=(t,ic,tx,badge)=>`<button class="snav${tab===t?' on':''}" onclick="setTab('${t}')"><span class="snav-ic">${ic}</span><span class="snav-tx">${tx}</span>${badge?`<span class="snav-badge">${badge}</span>`:''}</button>`;
   if(canManage()){
     const full=isAdmin(); // só admin vê Horas, Financeiro e Config
     const allowed=full?['dash','cal','tasks','deliver','otim','resultados','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','clients'];
     if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
-    nav.innerHTML=`
-      <button class="tab ${tab==='dash'?'on':''}" onclick="setTab('dash')">📊 Painel</button>
-      <button class="tab ${tab==='cal'?'on':''}" onclick="setTab('cal')">📅 Calendário</button>
-      <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Tarefas</button>
-      <button class="tab ${tab==='deliver'?'on':''}" onclick="setTab('deliver')">📦 Entregas</button>
-      <button class="tab ${tab==='otim'?'on':''}" onclick="setTab('otim')">📈 Otimizações</button>
-      <button class="tab ${tab==='resultados'?'on':''}" onclick="setTab('resultados')">📊 Resultados</button>
-      ${full?`<button class="tab ${tab==='horas'?'on':''}" onclick="setTab('horas')">⏱️ Horas</button>`:''}
-      ${full?`<button class="tab sep ${tab==='financeiro'?'on':''}" onclick="setTab('financeiro')">💰 Financeiro</button>`:''}
-      <button class="tab ${tab==='clients'?'on':''}" onclick="setTab('clients')">👥 Clientes <span class="badge">${state.clients.length}</span></button>
-      ${full?`<button class="tab ${tab==='config'?'on':''}" onclick="setTab('config')">⚙️ Config</button>`:''}`;
-    app.appendChild(nav);
+    if(side)side.innerHTML=
+      item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')
+      +(full?item('horas','⏱️','Horas'):'')+(full?item('financeiro','💰','Financeiro'):'')
+      +item('clients','👥','Clientes',state.clients.length)+(full?item('config','⚙️','Config'):'');
     if(tab==='dash')renderDash(app);
     else if(tab==='clients')renderClients(app);
     else if(tab==='tasks')renderTasks(app);
@@ -1018,14 +1044,12 @@ function render(){
     else renderCal(app);
   }else{
     if(tab!=='tasks')tab='cal';
-    nav.innerHTML=`
-      <button class="tab ${tab==='cal'?'on':''}" onclick="setTab('cal')">📅 Calendário</button>
-      <button class="tab ${tab==='tasks'?'on':''}" onclick="setTab('tasks')">✅ Minhas tarefas</button>`;
-    app.appendChild(nav);
+    if(side)side.innerHTML=item('cal','📅','Calendário')+item('tasks','✅','Minhas tarefas');
     (tab==='tasks')?renderTasks(app):renderCal(app);
   }
   refreshClientDatalist();
 }
+function toggleSide(open){const s=$('#side'),o=$('#sideOv');if(!s)return;if(open===undefined)open=!s.classList.contains('open');s.classList.toggle('open',open);if(o)o.style.display=open?'block':'none';}
 function renderLogin(){
   $('#userChip').innerHTML='';
   const app=$('#app');
@@ -1057,7 +1081,7 @@ function renderUserChip(){
     ${gBtn}${notifBtn}
     <button class="uc-btn" onclick="logout()" title="Sair">Sair</button>`;
 }
-function setTab(t){if(t==='cal'&&tab!=='cal')view='day';tab=t;render();}
+function setTab(t){if(t==='cal'&&tab!=='cal')view='day';tab=t;render();toggleSide(false);}
 
 /* ---------- dashboard (admin) ---------- */
 function renderDash(app){

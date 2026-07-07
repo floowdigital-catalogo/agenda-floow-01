@@ -810,7 +810,8 @@ function respForDemand(typeId){return (state.users||[]).filter(u=>u.demands&&u.d
 function adminUsers(){return (state.users||[]).filter(u=>u.isAdmin);}
 function typeOf(id){return TYPES_().find(t=>t.id===id)||{id,em:'📌',label:'—',link:null};}
 function typeWantsLoc(typeId){const t=typeOf(typeId);return !!(t&&(t.id==='captacao'||/capta/i.test(t.label||'')));}
-function typeIsOnline(typeId){const t=typeOf(typeId);return !!(t&&t.online);}
+function typeIsOnline(typeId){const t=typeOf(typeId);if(!t)return false;if(t.online)return true;
+  return /acompanhamento comercial|kick|alinhamento estrat/i.test(t.label||'');} // reuniões online geram Meet (+ marque "🎥 Reunião online" no Config p/ outras)
 function updateLocField(){
   const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';
   const m=$('#fMeetWrap');if(m)m.style.display=typeIsOnline(draftType)?'':'none';
@@ -1278,7 +1279,7 @@ function renderOptInner(){
       <td>${prox}</td>
       ${wcells}
       <td>${stSel}</td>
-      <td>${link}</td>
+      <td><div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${link}<button class="btn ghost opt-link" onclick="copyCampanhas('${c.id}')" title="Copiar aviso de 'campanhas ativas' pro grupo do cliente">🚀 Avisar</button></div></td>
       <td><input class="t res-note" value="${esc(c.optNotes||'')}" placeholder="o que foi feito…" onchange="setOptNotes('${c.id}',this.value)"></td>
     </tr>`;}).join('');
   wrap.innerHTML=`
@@ -2011,11 +2012,12 @@ function doCopy(){const txt=currentCopyText();const ta=document.createElement('t
 const DOW_FULL=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
 function buildCompromisso(ev){
   const t=typeOf(ev.type), d=parseISO(ev.date);
-  let m=`${t.em} Próximo compromisso: ${t.label}\n\n`;
-  m+=`📆 Dia: ${DOW_FULL[d.getDay()]} (${pad(d.getDate())}/${pad(d.getMonth()+1)})\n`;
-  if(ev.time)m+=`🕐 Horário: ${ev.time}${ev.end?` às ${ev.end}`:''}\n`;
-  if(ev.meetLink)m+=`🔗 Link: ${ev.meetLink}\n`;
-  else if(ev.loc)m+=`📍 Localização: ${ev.loc}\n`;
+  const hora=ev.time?ev.time.replace(/:00$/,'')+'hs':'';
+  let m=`*Próximo compromisso | ${t.label}*\n\n`;
+  m+=`📆 *Dia:* ${DOW_FULL[d.getDay()]} (${pad(d.getDate())}/${pad(d.getMonth()+1)})\n`;
+  if(hora)m+=`🕐 *Hora:* ${hora}\n`;
+  if(ev.meetLink)m+=`🔗 *link:* ${ev.meetLink}\n`;
+  else if(ev.loc)m+=`📍 *Localização:* ${ev.loc}\n`;
   return m.trim();
 }
 function copyCompromisso(){
@@ -2024,6 +2026,18 @@ function copyCompromisso(){
   const txt=buildCompromisso(ev);
   const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();
   try{document.execCommand('copy');toast('Compromisso copiado! Cole no grupo 📋');}catch(e){toast('Copie manualmente');}
+  document.body.removeChild(ta);
+}
+/* ---------- 🚀 aviso de "campanhas ativas" (pra mandar no grupo toda segunda) ---------- */
+function buildCampanhasMsg(c){
+  const nome=c.name||'cliente';
+  return `🚀 Bom dia! As campanhas da semana da *${nome}* já estão *no ar*! 📈\n\nBora com tudo essa semana — qualquer novidade a gente avisa por aqui. 💪`;
+}
+function copyCampanhas(cid){
+  const c=clientById(cid);if(!c)return;
+  const txt=buildCampanhasMsg(c);
+  const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');toast('Aviso copiado! Cole no grupo 🚀');}catch(e){toast('Copie manualmente');}
   document.body.removeChild(ta);
 }
 

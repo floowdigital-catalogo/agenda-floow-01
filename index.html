@@ -593,6 +593,10 @@
       <label class="f">📍 Localização</label>
       <input class="t" id="fLoc" placeholder="Ex: estúdio, loja do cliente, endereço…">
     </div>
+    <div id="fMeetWrap" style="display:none">
+      <label class="f">🔗 Link do Meet <span style="text-transform:none;color:var(--txt-faint)">(automático se conectar o Google, ou cole aqui)</span></label>
+      <input class="t" id="fMeet" placeholder="https://meet.google.com/…">
+    </div>
     <label class="f">Responsável</label>
     <div class="respgrid" id="fResps"></div>
     <label class="f">Prioridade</label>
@@ -606,6 +610,7 @@
     <div class="donetoggle" id="fDone" onclick="toggleDone()"><span class="box" id="fDoneBox"></span> Marcar como concluído</div>
     <div class="modal-actions">
       <button class="btn del" id="evDel" onclick="deleteEv()" style="display:none">Excluir</button>
+      <button class="btn" id="evCompromisso" onclick="copyCompromisso()" style="display:none">📋 Compromisso</button>
       <button class="btn ghost" onclick="closeEv()">Cancelar</button>
       <button class="btn primary" id="evSave" onclick="saveEv()">Salvar</button>
     </div>
@@ -805,7 +810,11 @@ function respForDemand(typeId){return (state.users||[]).filter(u=>u.demands&&u.d
 function adminUsers(){return (state.users||[]).filter(u=>u.isAdmin);}
 function typeOf(id){return TYPES_().find(t=>t.id===id)||{id,em:'📌',label:'—',link:null};}
 function typeWantsLoc(typeId){const t=typeOf(typeId);return !!(t&&(t.id==='captacao'||/capta/i.test(t.label||'')));}
-function updateLocField(){const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';}
+function typeIsOnline(typeId){const t=typeOf(typeId);return !!(t&&t.online);}
+function updateLocField(){
+  const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';
+  const m=$('#fMeetWrap');if(m)m.style.display=typeIsOnline(draftType)?'':'none';
+}
 function typeDur(typeId){const t=typeOf(typeId);return (t&&t.dur>0)?t.dur:60;} // tempo médio (min); padrão 60
 function eventDuration(ev){const s=toMin(ev.time),e=toMin(ev.end);if(s!=null&&e!=null&&e>s)return e-s;return typeDur(ev.type);} // real se houver início+fim; senão a média
 function clientById(id){return state.clients.find(c=>c.id===id);}
@@ -1777,6 +1786,7 @@ function openEv(id,presetDate,presetClient){
   $('#fTime').value=ev?ev.time:'';
   $('#fEnd').value=ev?(ev.end||''):'';
   $('#fLoc').value=ev?(ev.loc||''):'';
+  $('#fMeet').value=ev?(ev.meetLink||''):'';
   $('#fObs').value=ev?(ev.obs||''):'';
   draftType=ev?ev.type:(state.types[0]&&state.types[0].id);
   const dl=respForDemand(draftType);
@@ -1784,11 +1794,12 @@ function openEv(id,presetDate,presetClient){
   draftDone=ev?!!ev.done:false;
   draftPrio=ev?(ev.priority||''):'';
   renderTypeBtns();renderRespBtns();renderDoneToggle();renderPrio();updateDurHint();updateLocField();
-  ['fClient','fDate','fTime','fEnd','fLoc','fObs'].forEach(idf=>$('#'+idf).disabled=ro);
+  ['fClient','fDate','fTime','fEnd','fLoc','fMeet','fObs'].forEach(idf=>$('#'+idf).disabled=ro);
   $('#fPrio').style.pointerEvents=ro?'none':'';$('#fPrio').style.opacity=ro?'.6':'';
   $('#fTypes').style.pointerEvents=ro?'none':'';$('#fTypes').style.opacity=ro?'.6':'';
   $('#fResps').style.pointerEvents=ro?'none':'';$('#fResps').style.opacity=ro?'.6':'';
   $('#evDel').style.display=(id&&canManage())?'block':'none';
+  $('#evCompromisso').style.display=id?'block':'none';
   $('#evSave').textContent=ro?'Salvar status':'Salvar';
   $('#evScrim').classList.add('on');
 }
@@ -1821,7 +1832,7 @@ function saveEv(){
   }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
   const title=typeOf(draftType).label;
-  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim()};
+  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',meetLink:typeIsOnline(draftType)?($('#fMeet').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim()};
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}
@@ -1902,6 +1913,9 @@ function renderTypesList(){
           <input class="t" type="number" min="0" id="durH${i}" style="width:62px" value="${Math.floor((t.dur||0)/60)||''}" placeholder="0" oninput="recalcTypeDur(${i})"><span class="cfg-link-lbl">h</span>
           <input class="t" type="number" min="0" max="59" id="durM${i}" style="width:62px" value="${(t.dur||0)%60||''}" placeholder="0" oninput="recalcTypeDur(${i})"><span class="cfg-link-lbl">min</span>
         </span></div>
+      <div class="cfg-link" style="margin-top:8px">
+        <label class="uadmin"><input type="checkbox" ${t.online?'checked':''} onchange="typesDraft[${i}].online=this.checked"> 🎥 Reunião online <span class="cfg-link-lbl" style="text-transform:none">(gera link do Meet)</span></label>
+      </div>
     </div>`).join('');
 }
 function recalcTypeDur(i){const h=parseInt($('#durH'+i).value)||0;const m=parseInt($('#durM'+i).value)||0;typesDraft[i].dur=h*60+m;}
@@ -1927,7 +1941,7 @@ function saveConfig(){
   const check=checkDraft.filter(c=>c.label.trim());
   const validLinks=new Set(check.map(c=>c.id));
   state.users=users.map(u=>({id:u.id,name:u.name.trim()||u.email.split('@')[0],email:u.email.trim(),pass:u.pass,isAdmin:!!u.isAdmin,isCS:!!u.isCS&&!u.isAdmin,googleSync:!!u.googleSync,color:u.color||'#888888',demands:(u.demands||[]).filter(d=>types.find(t=>t.id===d))}));
-  state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0}));
+  state.types=types.map(t=>({id:t.id,em:(t.em||'📌').trim()||'📌',label:t.label.trim(),link:(t.link&&validLinks.has(t.link))?t.link:null,dur:Number(t.dur)||0,online:!!t.online}));
   state.checklist=check.map(c=>({id:c.id,label:c.label.trim()}));
   if(driveDraft){state.driveRoot=(driveDraft.root||'').trim();state.driveTree=(driveDraft.tree||'');
     state.driveShares=(driveDraft.shares||[]).map(r=>({folder:(r.folder||'').trim(),emails:(r.emails||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean)})).filter(r=>r.folder&&r.emails.length);
@@ -1993,6 +2007,25 @@ function buildCopyText(){
 }
 function renderCopy(){$('#copyBox').textContent=currentCopyText();}
 function doCopy(){const txt=currentCopyText();const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');toast('Copiado! Cole no WhatsApp 📋');}catch(e){toast('Selecione e copie');}document.body.removeChild(ta);}
+/* ---------- 📋 mensagem do próximo compromisso (pra mandar no grupo do cliente) ---------- */
+const DOW_FULL=['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+function buildCompromisso(ev){
+  const t=typeOf(ev.type), d=parseISO(ev.date);
+  let m=`${t.em} Próximo compromisso: ${t.label}\n\n`;
+  m+=`📆 Dia: ${DOW_FULL[d.getDay()]} (${pad(d.getDate())}/${pad(d.getMonth()+1)})\n`;
+  if(ev.time)m+=`🕐 Horário: ${ev.time}${ev.end?` às ${ev.end}`:''}\n`;
+  if(ev.meetLink)m+=`🔗 Link: ${ev.meetLink}\n`;
+  else if(ev.loc)m+=`📍 Localização: ${ev.loc}\n`;
+  return m.trim();
+}
+function copyCompromisso(){
+  if(!editingId){toast('Salve a tarefa primeiro');return;}
+  const ev=state.events.find(e=>e.id===editingId);if(!ev)return;
+  const txt=buildCompromisso(ev);
+  const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');toast('Compromisso copiado! Cole no grupo 📋');}catch(e){toast('Copie manualmente');}
+  document.body.removeChild(ta);
+}
 
 function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
 
@@ -2194,12 +2227,13 @@ function shouldSyncGoogle(ev){
   const u=userById(ev.resp);
   return !!(u&&u.googleSync);
 }
-function gcalPayload(ev){
+function gcalPayload(ev,withMeet){
   const body={
     summary:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`,
     description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`,
     colorId:'3' // roxo ("Uva") no Google Agenda
   };
+  if(withMeet)body.conferenceData={createRequest:{requestId:'floow-'+ev.id,conferenceSolutionKey:{type:'hangoutsMeet'}}};
   if(ev.time){
     const end=ev.end||addMinHHMM(ev.time,60);
     body.start={dateTime:`${ev.date}T${ev.time}:00`,timeZone:GCAL_TZ};
@@ -2221,13 +2255,16 @@ function syncEventToGoogle(ev){
       ev.gcalId=null;
     }
     const isUpdate=!!ev.gcalId;
+    const withMeet=typeIsOnline(ev.type)&&!ev.meetLink; // gera Meet só se for reunião online e ainda sem link
     const base='https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(cal)+'/events';
-    const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'');
-    fetch(url,{method:isUpdate?'PATCH':'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(gcalPayload(ev))})
+    const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'')+(withMeet?'?conferenceDataVersion=1':'');
+    fetch(url,{method:isUpdate?'PATCH':'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(gcalPayload(ev,withMeet))})
       .then(r=>r.json()).then(data=>{
         if(data&&data.error){console.warn('gcal',data.error);toast('⚠️ Agenda ('+cal+'): '+(data.error.message||'falha'));return;}
-        if(data&&data.id){ev.gcalId=data.id;ev.gcalCal=cal;saveData();}
-        toast('📅 Na agenda de '+respName(ev.resp));
+        if(data&&data.id){ev.gcalId=data.id;ev.gcalCal=cal;}
+        if(data&&data.hangoutLink&&!ev.meetLink)ev.meetLink=data.hangoutLink;
+        if(data&&data.id)saveData();
+        toast('📅 Na agenda de '+respName(ev.resp)+(ev.meetLink?' · Meet 🔗':''));
       }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar na agenda');});
   });
 }

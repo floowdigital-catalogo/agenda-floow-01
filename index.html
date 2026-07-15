@@ -2127,6 +2127,22 @@ async function loadPainel(){
   if(currentUser)render(); // re-renderiza pra Painel/Otimizações/Resultados já mostrarem a situação
 }
 function painelMap(){const m={};((painelCache&&painelCache.clientes)||[]).forEach(c=>{if(c.code)m[String(c.code)]=c;});return m;}
+/* ---------- 📊 relatório semanal do cliente (robô manda pronto em 'floow-relatorios') ---------- */
+let relCache=null, relLoaded=false, relLoading=false;
+async function loadRelatorios(){
+  if(relLoading)return; relLoading=true;
+  try{const r=await window.storage.get('floow-relatorios',true);relCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
+  catch(e){relCache={clientes:[]};}
+  relLoaded=true;relLoading=false;
+  if(currentUser)render();
+}
+function relatorioDoCliente(code){const r=relCache;if(!r||!Array.isArray(r.clientes)||!code)return null;const f=r.clientes.find(c=>String(c.code)===String(code));return f?f.texto:null;}
+async function copiarRelatorio(code){
+  const txt=relatorioDoCliente(code);
+  if(!txt){toast('Relatório ainda não gerado. Rode enviarRelatorios no robô.');return;}
+  try{await navigator.clipboard.writeText(txt);toast('📋 Relatório copiado! Cole no grupo do cliente.');}
+  catch(e){prompt('Copie o relatório:',txt);}
+}
 /* ---------- 💰 saldos das contas de anúncio (robô manda em 'floow-saldos') ---------- */
 let saldosCache=null, saldosLoaded=false, saldosLoading=false, saldoNotified=false;
 async function loadSaldos(){
@@ -2209,7 +2225,7 @@ function setPainelCfg(){
   saveData();renderResultadosInner();
 }
 function refreshPainel(){painelLoaded=false;loadPainel();renderResultadosInner();}
-function renderResultados(app){app.insertAdjacentHTML('beforeend','<div id="resWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();renderResultadosInner();}
+function renderResultados(app){app.insertAdjacentHTML('beforeend','<div id="resWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();if(!relLoaded&&!relLoading)loadRelatorios();renderResultadosInner();}
 function renderResultadosInner(){
   const wrap=$('#resWrap');if(!wrap)return;
   const cfg=resultCfg();
@@ -2235,6 +2251,7 @@ function renderResultadosInner(){
       <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
       <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</td>
       <td>${optSel(r.c)}</td>
+      <td>${relatorioDoCliente(r.c.code)?`<button class="btn ghost opt-link" onclick="copiarRelatorio('${esc(r.c.code)}')" title="Copiar relatório da última semana">📋 Copiar</button>`:'<span style="color:var(--txt-faint)">—</span>'}</td>
       <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
     </tr>`;}).join('');
   wrap.innerHTML=`
@@ -2278,8 +2295,8 @@ function renderResultadosInner(){
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação</th><th>✏️ Você define</th><th>Obs.</th></tr></thead>
-        <tbody>${body||'<tr><td colspan="12" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
+        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação</th><th>✏️ Você define</th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
+        <tbody>${body||'<tr><td colspan="13" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
       </table>
     </div>`;
 }

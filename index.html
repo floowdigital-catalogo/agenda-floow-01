@@ -1333,8 +1333,10 @@ function renderOptInner(){
     const url=clientComercialUrl(c);
     const link=url?`<a class="btn ghost opt-link" href="${esc(url)}" target="_blank" rel="noopener">Comercial ↗</a>`:'<span style="color:var(--txt-faint)">—</span>';
     const stSel=`<select class="filter" onchange="setOptStatus('${c.id}',this.value)">${[['ativo','🟢 Ativo'],['pausado','⏸ Pausado']].map(o=>`<option value="${o[0]}" ${c.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>`;
-    const sd=saldoDoCliente(c.code);
-    const sdCell=sd==null?'<span style="color:var(--txt-faint)">—</span>':`<span style="color:${sd<saldoMin()?'#f2675c':(sd<saldoMin()*3?'#f5b400':'#36d399')};font-weight:600" title="${sd<saldoMin()?'Saldo baixo!':''}">${fmtBRL(sd)}</span>`;
+    const cta=contaDoCliente(c.code);
+    const sd=(cta&&cta.saldo!=null)?Number(cta.saldo):null;
+    const sdCell=(cta&&cta.cartao)?'<span style="color:var(--txt-faint)" title="Paga no cartão — sem saldo pré-pago pra acompanhar">💳 Cartão</span>'
+      :(sd==null?'<span style="color:var(--txt-faint)">—</span>':`<span style="color:${sd<saldoMin()?'#f2675c':(sd<saldoMin()*3?'#f5b400':'#36d399')};font-weight:600" title="${sd<saldoMin()?'Saldo baixo!':''}">${fmtBRL(sd)}</span>`);
     return `<tr>
       <td class="res-cli">${c.code?`<span class="ccode">#${esc(c.code)}</span> `:''}${esc(c.name)}</td>
       <td>${sdCell}</td>
@@ -2154,8 +2156,9 @@ async function loadSaldos(){
   if(currentUser)render();
 }
 function saldoMin(){return Number(saldosCache&&saldosCache.minimo)||30;}
-function saldosBaixos(){const s=saldosCache;if(!s||!Array.isArray(s.contas))return [];const min=saldoMin();return s.contas.filter(c=>Number(c.saldo)<min);}
-function saldoDoCliente(code){const s=saldosCache;if(!s||!Array.isArray(s.contas)||!code)return null;const f=s.contas.find(c=>String(c.code)===String(code));return f?Number(f.saldo):null;}
+function saldosBaixos(){const s=saldosCache;if(!s||!Array.isArray(s.contas))return [];const min=saldoMin();return s.contas.filter(c=>c.saldo!=null&&!c.cartao&&Number(c.saldo)<min);} // ignora contas de cartão
+function contaDoCliente(code){const s=saldosCache;if(!s||!Array.isArray(s.contas)||!code)return null;return s.contas.find(c=>String(c.code)===String(code))||null;}
+function saldoDoCliente(code){const f=contaDoCliente(code);return (f&&f.saldo!=null)?Number(f.saldo):null;}
 function notifySaldoBaixo(){
   const b=saldosBaixos();
   if(!b.length||saldoNotified)return;

@@ -447,6 +447,12 @@
   .saldo-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
   .saldo-chip{background:var(--ink-2);border:1px solid var(--line);border-radius:20px;padding:3px 11px;font-size:12px;white-space:nowrap}
   .saldo-chip b{color:var(--danger)}
+  /* 📦 entregáveis no modal do cliente */
+  .entg-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 2px}
+  .entg-item{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .entg-label{font-size:14px}
+  .entg-seg{flex:none}
+  .entg-seg button{font-size:12px;padding:5px 11px}
   /* financeiro */
   .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
   .fin-row:last-child{border-bottom:none}
@@ -683,6 +689,8 @@
       <input class="t" id="clDrive" placeholder="Cole o link da pasta do Drive…">
       <button class="btn" onclick="openClientDrive()" title="Abrir pasta">Abrir</button>
     </div>
+    <label class="f" style="margin-top:16px">📦 Entregáveis do plano</label>
+    <div id="clEntregaveis" class="entg-list"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 4px">
       <label class="f" style="margin:0">Linha do tempo</label>
       <div style="display:flex;gap:8px">
@@ -815,6 +823,29 @@ function deliverDone(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]
 function deliverNA(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]==='na').length;} // marcados como "não precisa"
 function deliverTotal(c){return CHECK_().length-deliverNA(c);} // total que conta no progresso
 function deliverComplete(c){return CHECK_().every(i=>c.checklist&&(c.checklist[i.id]===true||c.checklist[i.id]==='na'));}
+/* ---------- 📦 Entregáveis do plano (dentro do modal do cliente: Incluso / Não incluso) ---------- */
+const DEF_ENTREGAVEIS=[
+  {id:'estrat',label:'Estruturação estratégica'},
+  {id:'engaj',label:'Engajamento magnético'},
+  {id:'criativos',label:'Criativos assertivos'},
+  {id:'midias',label:'Gestão de mídias pagas'},
+  {id:'comercial',label:'Estruturação comercial'},
+];
+function ensureEntregaveis(c){if(!c.entregaveis)c.entregaveis={};DEF_ENTREGAVEIS.forEach(i=>{if(!(i.id in c.entregaveis))c.entregaveis[i.id]=true;});}
+function setEntregavel(id,inc){const c=clientById(openClientId);if(!c||!canManage())return;ensureEntregaveis(c);c.entregaveis[id]=inc;touch(c);saveData();renderEntregaveis();}
+function renderEntregaveis(){
+  const box=$('#clEntregaveis');if(!box)return;
+  const c=clientById(openClientId);if(!c){box.innerHTML='';return;}
+  ensureEntregaveis(c);
+  box.innerHTML=DEF_ENTREGAVEIS.map(i=>{const inc=c.entregaveis[i.id]!==false;
+    return `<div class="entg-item">
+      <span class="entg-label">${inc?'✅':'⬜'} ${esc(i.label)}</span>
+      <div class="seg entg-seg">
+        <button class="${inc?'on':''}" onclick="setEntregavel('${i.id}',true)">Incluso</button>
+        <button class="${!inc?'on':''}" onclick="setEntregavel('${i.id}',false)">Não incluso</button>
+      </div>
+    </div>`;}).join('');
+}
 function applyDeliveryLink(ev){
   if(!ev||!ev.done)return;
   const t=TYPES_().find(x=>x.id===ev.type);if(!t||!t.link)return;
@@ -1055,16 +1086,15 @@ function render(){
   const item=(t,ic,tx,badge)=>`<button class="snav${tab===t?' on':''}" onclick="setTab('${t}')"><span class="snav-ic">${NAV_ICONS[t]||ic}</span><span class="snav-tx">${tx}</span>${badge?`<span class="snav-badge">${badge}</span>`:''}</button>`;
   if(canManage()){
     const full=isAdmin(); // só admin vê Horas, Financeiro e Config
-    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','clients'];
+    const allowed=full?['dash','cal','tasks','otim','resultados','horas','financeiro','clients','config']:['dash','cal','tasks','otim','resultados','clients'];
     if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
     if(side)side.innerHTML=
-      item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')
+      item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')
       +(full?item('horas','⏱️','Horas'):'')+(full?item('financeiro','💰','Financeiro'):'')
       +item('clients','👥','Clientes',state.clients.length)+(full?item('config','⚙️','Config'):'');
     if(tab==='dash')renderDash(app);
     else if(tab==='clients')renderClients(app);
     else if(tab==='tasks')renderTasks(app);
-    else if(tab==='deliver')renderDeliver(app);
     else if(tab==='otim')renderOpt(app);
     else if(tab==='resultados')renderResultados(app);
     else if(tab==='horas')renderHours(app);
@@ -1792,6 +1822,7 @@ function openClient(id){
   $('#clStatus').value=c.status;
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#clDrive').value=c.driveUrl||'';
+  renderEntregaveis();
   renderTimeline();
   $('#clientScrim').classList.add('on');
 }
@@ -2144,6 +2175,55 @@ async function copiarRelatorio(code){
   if(!txt){toast('Relatório ainda não gerado. Rode enviarRelatorios no robô.');return;}
   try{await navigator.clipboard.writeText(txt);toast('📋 Relatório copiado! Cole no grupo do cliente.');}
   catch(e){prompt('Copie o relatório:',txt);}
+}
+/* ---------- 💰 cobrança Pix (gera "copia e cola" com valor embutido) ---------- */
+function pixCfg(){return {
+  chave:(state.pixChave||'').trim(),
+  nome:(state.pixNome||'FLOOW DIGITAL'),
+  cidade:(state.pixCidade||'SAO PAULO'),
+  valor:(state.cobrancaValor!=null?Number(state.cobrancaValor):250),
+  msg:(state.cobrancaMsg||'Oi! 💛 Fechamos a semana.\nPra reativar as campanhas na segunda, adicione o saldo:\n\n💰 *Valor:* {VALOR}\n🔑 *Pix (copia e cola):*\n{PIX}')
+};}
+function setPixCfg(){
+  state.pixChave=($('#pixChave')?$('#pixChave').value:'').trim();
+  state.pixNome=($('#pixNome')?$('#pixNome').value:'').trim()||'FLOOW DIGITAL';
+  state.pixCidade=($('#pixCidade')?$('#pixCidade').value:'').trim()||'SAO PAULO';
+  state.cobrancaValor=Number($('#cobrValor')?$('#cobrValor').value:250)||250;
+  saveData();toast('💾 Cobrança salva');
+}
+function _semAcento_(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();}
+function _emv_(id,v){const s=String(v);return id+String(s.length).padStart(2,'0')+s;}
+function _crc16_(str){let c=0xFFFF;for(let i=0;i<str.length;i++){c^=str.charCodeAt(i)<<8;for(let j=0;j<8;j++){c=(c&0x8000)?((c<<1)^0x1021):(c<<1);c&=0xFFFF;}}return c.toString(16).toUpperCase().padStart(4,'0');}
+function pixCopiaeCola(valor,txid){
+  const cfg=pixCfg();
+  if(!cfg.chave)return '';
+  const gui=_emv_('00','br.gov.bcb.pix')+_emv_('01',cfg.chave);
+  const mai=_emv_('26',gui);
+  const nome=_semAcento_(cfg.nome).slice(0,25), cidade=_semAcento_(cfg.cidade).slice(0,15);
+  const tx=_emv_('05',(String(txid||'***').replace(/[^A-Za-z0-9]/g,'')||'***').slice(0,25));
+  const adic=_emv_('62',tx);
+  let p='';
+  p+=_emv_('00','01');                        // payload format
+  p+=_emv_('01','12');                         // ponto de iniciação: 12 = reutilizável (com valor)
+  p+=mai;
+  p+=_emv_('52','0000');                       // MCC
+  p+=_emv_('53','986');                        // moeda BRL
+  p+=_emv_('54',Number(valor).toFixed(2));     // valor
+  p+=_emv_('58','BR');
+  p+=_emv_('59',nome);
+  p+=_emv_('60',cidade);
+  p+=adic;
+  p+='6304';                                   // placeholder CRC
+  return p+_crc16_(p);
+}
+async function cobrarPix(cid){
+  const c=clientById(cid);if(!c)return;
+  const cfg=pixCfg();
+  if(!cfg.chave){toast('⚠️ Configure a chave Pix primeiro (botão ⚙️ Cobrança).');return;}
+  const codigo=pixCopiaeCola(cfg.valor,'FLOOW'+(c.code||''));
+  const txt=cfg.msg.replace('{VALOR}',fmtBRL(cfg.valor)).replace('{PIX}',codigo||cfg.chave);
+  try{await navigator.clipboard.writeText(txt);toast('💰 Cobrança copiada! Cole no grupo do cliente.');}
+  catch(e){prompt('Copie a cobrança:',txt);}
 }
 /* ---------- 💰 saldos das contas de anúncio (robô manda em 'floow-saldos') ---------- */
 let saldosCache=null, saldosLoaded=false, saldosLoading=false, saldoNotified=false;

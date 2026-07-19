@@ -868,7 +868,7 @@ const isAdmin=()=>!!(currentUser&&currentUser.isAdmin);
 const isCS=()=>!!(currentUser&&currentUser.isCS&&!currentUser.isAdmin); // Customer Success: gerencia, mas SEM Financeiro/Config/Horas
 const canManage=()=>isAdmin()||isCS(); // pode criar/editar tarefas e ver dados de toda a equipe
 const myMember=()=>currentUser?currentUser.id:null;
-let clientSearch='', clientStatusFilter='all', clientHealthFilter='all';
+let clientSearch='', clientStatusFilter='ativos', clientHealthFilter='all';
 let openClientId=null, clientDraftStatus='ativo', clientDraftOwner=null;
 
 const $=s=>document.querySelector(s);
@@ -1089,7 +1089,7 @@ function render(){
     if(side)side.innerHTML=
       item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')
       +(full?item('horas','⏱️','Horas'):'')+(full?item('financeiro','💰','Financeiro'):'')
-      +item('clients','👥','Clientes',state.clients.length)+(full?item('config','⚙️','Config'):'');
+      +item('clients','👥','Clientes',state.clients.filter(c=>c.status!=='arquivado').length)+(full?item('config','⚙️','Config'):'');
     if(tab==='dash')renderDash(app);
     else if(tab==='clients')renderClients(app);
     else if(tab==='tasks')renderTasks(app);
@@ -1802,7 +1802,7 @@ function renderClients(app){
       <option value="all">Toda situação</option><option value="excelente">🟢 Excelente</option><option value="bom">🔵 Bom</option><option value="observacao">🟡 Observação</option><option value="ruim">🔴 Ruim</option><option value="semvendas">⚪ Sem vendas</option><option value="sem">➖ Sem dados</option>
     </select>
     <select class="filter" id="cStatusF" onchange="clientStatusFilter=this.value;renderClientGrid()">
-      <option value="all">Todos (${state.clients.length})</option><option value="ativo">Ativos</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados</option>
+      <option value="ativos">Ativos (${state.clients.filter(c=>c.status!=='arquivado').length})</option><option value="pausado">Pausados</option><option value="arquivado">Arquivados (${state.clients.filter(c=>c.status==='arquivado').length})</option><option value="all">Todos (${state.clients.length})</option>
     </select>
     <div class="spacer"></div>
     ${isAdmin()?`<button class="btn" onclick="openBulk()">📥 Importar lista</button>
@@ -1820,7 +1820,8 @@ function addQuick(){
 function renderClientGrid(){
   const wrap=$('#clientGridWrap');if(!wrap)return;
   let list=state.clients.slice();
-  if(clientStatusFilter!=='all')list=list.filter(c=>c.status===clientStatusFilter);
+  if(clientStatusFilter==='ativos')list=list.filter(c=>c.status!=='arquivado'); // padrão: esconde arquivados
+  else if(clientStatusFilter!=='all')list=list.filter(c=>c.status===clientStatusFilter);
   if(clientHealthFilter!=='all')list=list.filter(c=>clientSituacao(c)===clientHealthFilter);
   if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase();list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q));}
   list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});

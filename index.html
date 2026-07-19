@@ -689,6 +689,8 @@
       <input class="t" id="clDrive" placeholder="Cole o link da pasta do Drive…">
       <button class="btn" onclick="openClientDrive()" title="Abrir pasta">Abrir</button>
     </div>
+    <label class="f" style="margin-top:16px">📦 Plano do cliente <span style="text-transform:none;color:var(--txt-faint)">— marque o que NÃO está incluso (vira "Não precisa" em Entregas)</span></label>
+    <div id="clPlano" class="entg-list"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 4px">
       <label class="f" style="margin:0">Linha do tempo</label>
       <div style="display:flex;gap:8px">
@@ -821,26 +823,24 @@ function deliverDone(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]
 function deliverNA(c){return CHECK_().filter(i=>c.checklist&&c.checklist[i.id]==='na').length;} // marcados como "não precisa"
 function deliverTotal(c){return CHECK_().length-deliverNA(c);} // total que conta no progresso
 function deliverComplete(c){return CHECK_().every(i=>c.checklist&&(c.checklist[i.id]===true||c.checklist[i.id]==='na'));}
-/* ---------- 📦 Entregáveis do plano (dentro do modal do cliente: Incluso / Não incluso) ---------- */
-const DEF_ENTREGAVEIS=[
-  {id:'estrat',label:'Estruturação estratégica'},
-  {id:'engaj',label:'Engajamento magnético'},
-  {id:'criativos',label:'Criativos assertivos'},
-  {id:'midias',label:'Gestão de mídias pagas'},
-  {id:'comercial',label:'Estruturação comercial'},
-];
-function ensureEntregaveis(c){if(!c.entregaveis)c.entregaveis={};DEF_ENTREGAVEIS.forEach(i=>{if(!(i.id in c.entregaveis))c.entregaveis[i.id]=true;});}
-function setEntregavel(id,inc){const c=clientById(openClientId);if(!c||!canManage())return;ensureEntregaveis(c);c.entregaveis[id]=inc;touch(c);saveData();renderEntregaveis();}
-function renderEntregaveis(){
-  const box=$('#clEntregaveis');if(!box)return;
+/* ---------- 📦 Plano do cliente (modal): marca Incluso/Não incluso → "Não incluso" vira "Não precisa" nas Entregas ---------- */
+function setPlanoItem(id,inc){
+  const c=clientById(openClientId);if(!c||!canManage())return;
+  ensureChecklist(c);
+  if(!inc){c.checklist[id]='na';}                       // Não incluso → "Não precisa" nas Entregas
+  else if(c.checklist[id]==='na'){c.checklist[id]=false;} // voltou a Incluso → "A fazer"
+  touch(c);saveData();renderPlano();
+}
+function renderPlano(){
+  const box=$('#clPlano');if(!box)return;
   const c=clientById(openClientId);if(!c){box.innerHTML='';return;}
-  ensureEntregaveis(c);
-  box.innerHTML=DEF_ENTREGAVEIS.map(i=>{const inc=c.entregaveis[i.id]!==false;
+  ensureChecklist(c);
+  box.innerHTML=CHECK_().map(i=>{const inc=(c.checklist[i.id]!=='na');
     return `<div class="entg-item">
-      <span class="entg-label">${inc?'✅':'⬜'} ${esc(i.label)}</span>
+      <span class="entg-label">${inc?'✅':'🚫'} ${esc(i.label)}</span>
       <div class="seg entg-seg">
-        <button class="${inc?'on':''}" onclick="setEntregavel('${i.id}',true)">Incluso</button>
-        <button class="${!inc?'on':''}" onclick="setEntregavel('${i.id}',false)">Não incluso</button>
+        <button class="${inc?'on':''}" onclick="setPlanoItem('${i.id}',true)">Incluso</button>
+        <button class="${!inc?'on':''}" onclick="setPlanoItem('${i.id}',false)">Não incluso</button>
       </div>
     </div>`;}).join('');
 }
@@ -1891,6 +1891,7 @@ function openClient(id){
   $('#clStatus').value=c.status;
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#clDrive').value=c.driveUrl||'';
+  renderPlano();
   renderTimeline();
   $('#clientScrim').classList.add('on');
 }

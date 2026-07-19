@@ -453,6 +453,8 @@
   .entg-label{font-size:14px}
   .entg-seg{flex:none}
   .entg-seg button{font-size:12px;padding:5px 11px}
+  /* 🤝 radar de relacionamento/churn */
+  .rel-tag{display:inline-block;background:var(--ink-2);border:1px solid var(--line);border-radius:20px;padding:2px 9px;font-size:11px;margin:1px 0;white-space:nowrap}
   /* financeiro */
   .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
   .fin-row:last-child{border-bottom:none}
@@ -689,6 +691,8 @@
       <input class="t" id="clDrive" placeholder="Cole o link da pasta do Drive…">
       <button class="btn" onclick="openClientDrive()" title="Abrir pasta">Abrir</button>
     </div>
+    <label class="f" style="margin-top:16px">🤝 Relacionamento</label>
+    <div id="clContact"></div>
     <label class="f" style="margin-top:16px">📦 Plano do cliente <span style="text-transform:none;color:var(--txt-faint)">— marque o que NÃO está incluso (vira "Não precisa" em Entregas)</span></label>
     <div id="clPlano" class="entg-list"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 4px">
@@ -1084,10 +1088,10 @@ function render(){
   const item=(t,ic,tx,badge)=>`<button class="snav${tab===t?' on':''}" onclick="setTab('${t}')"><span class="snav-ic">${NAV_ICONS[t]||ic}</span><span class="snav-tx">${tx}</span>${badge?`<span class="snav-badge">${badge}</span>`:''}</button>`;
   if(canManage()){
     const full=isAdmin(); // só admin vê Horas, Financeiro e Config
-    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','clients'];
+    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','relacao','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','relacao','clients'];
     if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
     if(side)side.innerHTML=
-      item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')
+      item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')+item('relacao','🤝','Relacionamento')
       +(full?item('horas','⏱️','Horas'):'')+(full?item('financeiro','💰','Financeiro'):'')
       +item('clients','👥','Clientes',state.clients.filter(c=>c.status!=='arquivado').length)+(full?item('config','⚙️','Config'):'');
     if(tab==='dash')renderDash(app);
@@ -1096,6 +1100,7 @@ function render(){
     else if(tab==='deliver')renderDeliver(app);
     else if(tab==='otim')renderOpt(app);
     else if(tab==='resultados')renderResultados(app);
+    else if(tab==='relacao')renderRelacao(app);
     else if(tab==='horas')renderHours(app);
     else if(tab==='financeiro')renderFinance(app);
     else if(tab==='config')renderConfig(app);
@@ -1509,6 +1514,8 @@ function health(c){
   else if(sit==='observacao'){r+=1;motivos.push('📊 em observação');}
   const cta=contaDoCliente(c.code);const saldo=(cta&&cta.saldo!=null)?Number(cta.saldo):null;
   if(saldo!=null&&saldo<saldoMin()){r+=(saldo<=0?2:1);motivos.push(saldo<=0?'💰 sem saldo':'💰 saldo baixo');}
+  const vs=vendasSumiram(c.code);
+  if(vs){r+=2;motivos.push('📉 '+vs);}
   const d=daysSince(c);
   if(d==null){r+=1;motivos.push('🗣️ sem contato registrado');}
   else if(d>14){r+=2;motivos.push('🗣️ '+d+' dias sem contato');}
@@ -1541,7 +1548,7 @@ function renderRelacaoInner(){
       <td style="color:${dc};font-weight:600">${dias}</td>
       <td>${h.motivos.length?h.motivos.map(x=>`<span class="rel-tag">${x}</span>`).join(' '):'<span style="color:#36d399">tudo em dia ✓</span>'}</td>
       <td><button class="btn primary opt-link" onclick="markContact('${r.c.id}')">✅ Falei hoje</button></td>
-      <td><button class="btn ghost opt-link" onclick="openClient('${r.c.id}')">Abrir</button></td>
+      <td>${(metricsFor(r.c.code)&&Number(metricsFor(r.c.code).faturamento)>0)?`<button class="btn ghost opt-link" onclick="celebrar('${r.c.id}')" title="Gerar mensagem de comemoração">🎉</button> `:''}<button class="btn ghost opt-link" onclick="openClient('${r.c.id}')">Abrir</button></td>
     </tr>`;}).join('');
   wrap.innerHTML=`
     <div class="panel">
@@ -1561,6 +1568,31 @@ function renderContactLine(){
   const d=daysSince(c);
   const txt=c.lastContact?('Último contato: '+String(c.lastContact).split('-').reverse().join('/')+(d!=null?` (${d===0?'hoje':d+' dias atrás'})`:'')):'Nenhum contato registrado ainda.';
   box.innerHTML=`<div class="entg-item"><span class="entg-label">${d!=null&&d>7?'🔴 ':'🗣️ '}${txt}</span><button class="btn primary" style="padding:6px 12px" onclick="markContact('${c.id}')">✅ Falei hoje</button></div>`;
+}
+/* churn: cliente que vendia e parou (14+ dias sem venda) — sinal clássico de risco */
+function vendasSumiram(code){
+  const raw=code?painelMap()[String(code)]:null;
+  if(!raw||!Array.isArray(raw.vendas)||raw.vendas.length<2)return null;
+  const dates=raw.vendas.map(v=>v.d).filter(Boolean).sort();
+  const last=dates[dates.length-1];const dt=last?parseISO(last):null;if(!dt)return null;
+  const t=new Date();
+  const dias=Math.round((new Date(t.getFullYear(),t.getMonth(),t.getDate())-new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()))/86400000);
+  return dias>=14?('vendas pararam há '+dias+' dias'):null;
+}
+/* 🎉 Momentos de celebração — gera mensagem de vitória pro grupo do cliente */
+function celebrar(cid){
+  const c=clientById(cid);if(!c)return;
+  const m=metricsFor(c.code);
+  if(!m||(Number(m.faturamento)||0)<=0){toast('Sem vendas no período pra comemorar ainda 😅');return;}
+  const vend=Number(m.vendas)||0,fat=Number(m.faturamento)||0,inv=Number(m.investido)||0,roas=inv>0?fat/inv:0;
+  const nome=(c.name||'').replace(/\s*\(.*\)/,'').trim();
+  let msg=`🎉 *Que resultado, ${nome}!* 🎉\n\n`;
+  msg+=`Olha o que a gente conquistou juntos:\n\n`;
+  if(vend)msg+=`🛒 *${vend}* ${vend===1?'venda':'vendas'}\n`;
+  msg+=`💰 *${fmtBRL(fat)}* em faturamento\n`;
+  if(roas>=1.5)msg+=`📈 ROAS de *${roas.toFixed(1)}x* — cada R$ 1 investido virou R$ ${roas.toFixed(2).replace('.',',')}!\n`;
+  msg+=`\nSeguimos juntos nesse ritmo! 🚀💛`;
+  navigator.clipboard.writeText(msg).then(()=>toast('🎉 Comemoração copiada! Cole no grupo do cliente.'),()=>prompt('Copie a mensagem:',msg));
 }
 
 /* ---------- calendar tab ---------- */
@@ -1892,6 +1924,7 @@ function openClient(id){
   $('#clStatus').value=c.status;
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#clDrive').value=c.driveUrl||'';
+  renderContactLine();
   renderPlano();
   renderTimeline();
   $('#clientScrim').classList.add('on');
@@ -2404,7 +2437,7 @@ function renderResultadosInner(){
       <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
       <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</td>
       <td>${optSel(r.c)}</td>
-      <td>${relatorioDoCliente(r.c.code)?`<button class="btn ghost opt-link" onclick="copiarRelatorio('${esc(r.c.code)}')" title="Copiar relatório da última semana">📋 Copiar</button>`:'<span style="color:var(--txt-faint)">—</span>'}</td>
+      <td>${relatorioDoCliente(r.c.code)?`<button class="btn ghost opt-link" onclick="copiarRelatorio('${esc(r.c.code)}')" title="Copiar relatório da última semana">📋 Copiar</button>`:'<span style="color:var(--txt-faint)">—</span>'}${(r.m&&Number(r.m.faturamento)>0)?` <button class="btn ghost opt-link" onclick="celebrar('${r.c.id}')" title="Gerar mensagem de comemoração">🎉</button>`:''}</td>
       <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
     </tr>`;}).join('');
   wrap.innerHTML=`

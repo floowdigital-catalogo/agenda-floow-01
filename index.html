@@ -455,6 +455,11 @@
   .entg-seg button{font-size:12px;padding:5px 11px}
   /* 🤝 radar de relacionamento/churn */
   .rel-tag{display:inline-block;background:var(--ink-2);border:1px solid var(--line);border-radius:20px;padding:2px 9px;font-size:11px;margin:1px 0;white-space:nowrap}
+  /* 💡 melhorias */
+  .mel-form{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .mel-form #melTit{flex:1;min-width:220px}
+  .mel-done td{opacity:.55}
+  .mel-done td:first-child{text-decoration:line-through}
   /* financeiro */
   .fin-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
   .fin-row:last-child{border-bottom:none}
@@ -922,6 +927,9 @@ async function load(){
   if(!state.types)state.types=JSON.parse(JSON.stringify(DEF_TYPES));
   if(!state.checklist)state.checklist=JSON.parse(JSON.stringify(DEF_CHECKLIST));
   if(!state.expenses)state.expenses=[];
+  if(!state.melhorias)state.melhorias=[];
+  if(!state.tombstones)state.tombstones={events:{},clients:{}};
+  if(!state.tombstones.melhorias)state.tombstones.melhorias={};
   if(!state.expensesSeeded){if(!state.expenses.length)state.expenses=DEFAULT_EXPENSES();state.expensesSeeded=true;}
   if(!state.tombstones)state.tombstones={events:{},clients:{}};
   if(!state.tombstones.events)state.tombstones.events={};
@@ -956,7 +964,7 @@ function mergeStates(remote,local){
   if(!remote)return local;
   if(!local)return remote;
   const rt=remote.tombstones||{}, lt=local.tombstones||{};
-  const tomb={events:mergeTomb(rt.events,lt.events),clients:mergeTomb(rt.clients,lt.clients)};
+  const tomb={events:mergeTomb(rt.events,lt.events),clients:mergeTomb(rt.clients,lt.clients),melhorias:mergeTomb(rt.melhorias,lt.melhorias)};
   // CONFIG (usuários/demandas/checklist/drive) = a versão MAIS RECENTE pelo carimbo cfgUpdatedAt.
   // Assim a cópia antiga de outro usuário não apaga mudanças do Config (ex.: ✅ Agenda do responsável).
   const cfgSrc=((local.cfgUpdatedAt||0)>=(remote.cfgUpdatedAt||0))?local:remote;
@@ -967,6 +975,7 @@ function mergeStates(remote,local){
     cfgUpdatedAt:Math.max(local.cfgUpdatedAt||0,remote.cfgUpdatedAt||0),
     events:mergeArrById(remote.events,local.events,tomb.events),
     clients:mergeArrById(remote.clients,local.clients,tomb.clients),
+    melhorias:mergeArrById(remote.melhorias,local.melhorias,tomb.melhorias),
     tombstones:tomb,
     version:9
   };
@@ -1067,6 +1076,7 @@ const NAV_ICONS={
   otim:_svg('<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>'),
   resultados:_svg('<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>'),
   relacao:_svg('<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/>'),
+  melhorias:_svg('<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/>'),
   horas:_svg('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'),
   financeiro:_svg('<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
   clients:_svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
@@ -1090,12 +1100,12 @@ function render(){
   const item=(t,ic,tx,badge)=>`<button class="snav${tab===t?' on':''}" onclick="setTab('${t}')"><span class="snav-ic">${NAV_ICONS[t]||ic}</span><span class="snav-tx">${tx}</span>${badge?`<span class="snav-badge">${badge}</span>`:''}</button>`;
   if(canManage()){
     const full=isAdmin(); // só admin vê Horas, Financeiro e Config
-    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','relacao','horas','financeiro','clients','config']:['dash','cal','tasks','deliver','otim','resultados','relacao','clients'];
+    const allowed=full?['dash','cal','tasks','deliver','otim','resultados','relacao','horas','financeiro','clients','melhorias','config']:['dash','cal','tasks','deliver','otim','resultados','relacao','clients','melhorias'];
     if(!allowed.includes(tab))tab='dash'; // CS não cai numa aba restrita
     if(side)side.innerHTML=
       item('dash','📊','Painel')+item('cal','📅','Calendário')+item('tasks','✅','Tarefas')+item('deliver','📦','Entregas')+item('otim','📈','Otimizações')+item('resultados','📊','Resultados')+item('relacao','🤝','Relacionamento')
       +(full?item('horas','⏱️','Horas'):'')+(full?item('financeiro','💰','Financeiro'):'')
-      +item('clients','👥','Clientes',state.clients.filter(c=>c.status!=='arquivado').length)+(full?item('config','⚙️','Config'):'');
+      +item('clients','👥','Clientes',state.clients.filter(c=>c.status!=='arquivado').length)+item('melhorias','💡','Melhorias')+(full?item('config','⚙️','Config'):'');
     if(tab==='dash')renderDash(app);
     else if(tab==='clients')renderClients(app);
     else if(tab==='tasks')renderTasks(app);
@@ -1105,6 +1115,7 @@ function render(){
     else if(tab==='relacao')renderRelacao(app);
     else if(tab==='horas')renderHours(app);
     else if(tab==='financeiro')renderFinance(app);
+    else if(tab==='melhorias')renderMelhorias(app);
     else if(tab==='config')renderConfig(app);
     else renderCal(app);
   }else{
@@ -1595,6 +1606,69 @@ function celebrar(cid){
   if(roas>=1.5)msg+=`📈 ROAS de *${roas.toFixed(1)}x* — cada R$ 1 investido virou R$ ${roas.toFixed(2).replace('.',',')}!\n`;
   msg+=`\nSeguimos juntos nesse ritmo! 🚀💛`;
   navigator.clipboard.writeText(msg).then(()=>toast('🎉 Comemoração copiada! Cole no grupo do cliente.'),()=>prompt('Copie a mensagem:',msg));
+}
+
+/* ---------- 💡 Melhorias (backlog interno da equipe) ---------- */
+const MEL_STATUS={ideia:{label:'💡 Ideia',ord:0},fazendo:{label:'🔨 Fazendo',ord:1},feito:{label:'✅ Feito',ord:2}};
+const MEL_PRIO={alta:{label:'🔴 Alta',ord:0},media:{label:'🟡 Média',ord:1},baixa:{label:'🔵 Baixa',ord:2}};
+function renderMelhorias(app){
+  const canEdit=canManage();
+  const emAberto=(state.melhorias||[]).filter(m=>m.status!=='feito').length;
+  const resps=state.users.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
+  app.insertAdjacentHTML('beforeend',`
+    <div class="panel">
+      <h3>💡 Melhorias <span class="h3-side">${emAberto} em aberto · ${(state.melhorias||[]).length} no total</span></h3>
+      <div class="empty-hint">Backlog da equipe: o que dá pra melhorar no processo, no app ou no atendimento — com responsável e status.</div>
+      ${canEdit?`<div class="mel-form">
+        <input class="t" id="melTit" placeholder="Descreva a melhoria… (ex.: alerta de conversão baixa)" onkeydown="if(event.key==='Enter')addMelhoria()">
+        <select class="t" id="melResp"><option value="">Responsável…</option>${resps}</select>
+        <select class="t" id="melPrio"><option value="alta">🔴 Alta</option><option value="media" selected>🟡 Média</option><option value="baixa">🔵 Baixa</option></select>
+        <button class="btn primary" onclick="addMelhoria()">+ Adicionar</button>
+      </div>`:''}
+    </div>
+    <div id="melWrap"></div>`);
+  renderMelhoriasList();
+}
+function renderMelhoriasList(){
+  const wrap=$('#melWrap');if(!wrap)return;
+  const canEdit=canManage();
+  const list=(state.melhorias||[]).slice().sort((a,b)=>{
+    const sa=(MEL_STATUS[a.status]||{}).ord??0,sb=(MEL_STATUS[b.status]||{}).ord??0;if(sa!==sb)return sa-sb;
+    const pa=(MEL_PRIO[a.prio]||{}).ord??1,pb=(MEL_PRIO[b.prio]||{}).ord??1;if(pa!==pb)return pa-pb;
+    return (b.createdAt||0)-(a.createdAt||0);
+  });
+  const respSel=m=>`<select class="filter" onchange="setMelhoria('${m.id}','resp',this.value)"><option value="">— responsável</option>${state.users.map(u=>`<option value="${u.id}" ${u.id===m.resp?'selected':''}>${esc(u.name)}</option>`).join('')}</select>`;
+  const prioSel=m=>`<select class="filter" onchange="setMelhoria('${m.id}','prio',this.value)">${Object.keys(MEL_PRIO).map(k=>`<option value="${k}" ${m.prio===k?'selected':''}>${MEL_PRIO[k].label}</option>`).join('')}</select>`;
+  const statSel=m=>`<select class="filter" onchange="setMelhoria('${m.id}','status',this.value)">${Object.keys(MEL_STATUS).map(k=>`<option value="${k}" ${m.status===k?'selected':''}>${MEL_STATUS[k].label}</option>`).join('')}</select>`;
+  const rows=list.map(m=>`<tr class="${m.status==='feito'?'mel-done':''}">
+    <td style="min-width:220px">${esc(m.titulo)}</td>
+    <td>${canEdit?respSel(m):esc(respName(m.resp))}</td>
+    <td>${canEdit?prioSel(m):(MEL_PRIO[m.prio]||{}).label||''}</td>
+    <td>${canEdit?statSel(m):(MEL_STATUS[m.status]||{}).label||''}</td>
+    ${canEdit?`<td><button class="btn ghost opt-link" onclick="delMelhoria('${m.id}')" title="Excluir">🗑️</button></td>`:''}
+  </tr>`).join('');
+  wrap.innerHTML=`<div class="panel" style="overflow-x:auto"><table class="res-table">
+    <thead><tr><th>Melhoria</th><th>Responsável</th><th>Prioridade</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead>
+    <tbody>${rows||`<tr><td colspan="5" class="empty-hint">Nenhuma melhoria ainda. Adicione a primeira! 💡</td></tr>`}</tbody>
+  </table></div>`;
+}
+function addMelhoria(){
+  if(!canManage())return;
+  const inp=$('#melTit');const tit=(inp.value||'').trim();if(!tit){inp.focus();return;}
+  if(!state.melhorias)state.melhorias=[];
+  state.melhorias.push({id:uid(),titulo:tit,resp:($('#melResp').value||''),prio:($('#melPrio').value||'media'),status:'ideia',createdAt:Date.now(),updatedAt:Date.now()});
+  saveData();render();toast('Melhoria adicionada 💡');
+}
+function setMelhoria(id,field,val){
+  const m=(state.melhorias||[]).find(x=>x.id===id);if(!m||!canManage())return;
+  m[field]=val;m.updatedAt=Date.now();saveData();render();
+}
+function delMelhoria(id){
+  if(!canManage())return;
+  if(!state.tombstones.melhorias)state.tombstones.melhorias={};
+  state.tombstones.melhorias[id]=Date.now();
+  state.melhorias=(state.melhorias||[]).filter(x=>x.id!==id);
+  saveData();render();toast('Melhoria removida');
 }
 
 /* ---------- calendar tab ---------- */

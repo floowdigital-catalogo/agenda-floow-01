@@ -1045,6 +1045,7 @@ function seed(){
 
 /* ---------- helpers ---------- */
 function clientArchived(id){const c=id?clientById(id):null;return !!(c&&c.status==='arquivado');}
+function codeArchived(code){if(!code)return false;const c=state.clients.find(x=>String(x.code)===String(code));return !!(c&&c.status==='arquivado');}
 function visibleEvents(){
   let evs=state.events.filter(e=>!clientArchived(e.clientId)); // esconde demandas de clientes arquivados
   if(!canManage()){return evs.filter(e=>e.resp===myMember());}
@@ -1164,7 +1165,7 @@ function setTab(t){if(t==='cal'&&tab!=='cal')view='day';tab=t;render();toggleSid
 /* ---------- dashboard (admin) ---------- */
 function renderDash(app){
   const today=iso(new Date());
-  const cs=state.clients, evs=state.events.filter(e=>!clientArchived(e.clientId));
+  const cs=state.clients.filter(c=>c.status!=='arquivado'), evs=state.events.filter(e=>!clientArchived(e.clientId));
   const total=cs.length, ativos=cs.filter(c=>c.status==='ativo').length;
   const pend=evs.filter(e=>!e.done).length;
   const atras=evs.filter(e=>!e.done&&e.date<today).length;
@@ -1274,7 +1275,7 @@ function saveBilling(){
 function renderFinance(app){app.insertAdjacentHTML('beforeend','<div id="financeWrap"></div>');renderFinanceInner();}
 function renderFinanceInner(){
   const wrap=$('#financeWrap');if(!wrap)return;
-  const cs=state.clients.slice().sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
+  const cs=state.clients.filter(c=>c.status!=='arquivado').sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+clientMonthly(c),0);
   const exps=state.expenses||[];
   const sumType=t=>exps.filter(e=>(e.type||'Fixa')===t).reduce((s,e)=>s+(Number(e.value)||0),0);
@@ -1486,7 +1487,7 @@ function renderDeliver(app){
 }
 function renderDeliverGrid(){
   const wrap=$('#deliverGridWrap');if(!wrap)return;
-  let list=state.clients.slice();
+  let list=state.clients.filter(c=>c.status!=='arquivado');
   if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase();list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q));}
   list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   if(!list.length){wrap.innerHTML=`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
@@ -1700,7 +1701,7 @@ function renderCal(app){
   app.appendChild(tb);
   if(canManage()){
     const cf=tb.querySelector('#cFilter');
-    cf.innerHTML=`<option value="">Todos os clientes</option>`+state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${c.id}" ${c.id===fClient?'selected':''}>${esc(c.name)}</option>`).join('');
+    cf.innerHTML=`<option value="">Todos os clientes</option>`+state.clients.filter(c=>c.status!=='arquivado').sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${c.id}" ${c.id===fClient?'selected':''}>${esc(c.name)}</option>`).join('');
     const rf=tb.querySelector('#rFilter');
     rf.innerHTML=`<option value="">Todos os responsáveis</option>`+state.users.map(m=>`<option value="${m.id}" ${m.id===fResp?'selected':''}>${esc(m.name)}</option>`).join('');
     const lg=document.createElement('div');lg.className='legend';
@@ -2259,7 +2260,7 @@ function saveConfig(){
 /* ---------- copy / whatsapp ---------- */
 let copyMode='agenda';
 function openCopy(presetId){
-  const cl=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt'));
+  const cl=state.clients.filter(c=>c.status!=='arquivado').sort((a,b)=>a.name.localeCompare(b.name,'pt'));
   $('#copyClient').innerHTML=cl.map(c=>`<option value="${c.id}" ${c.id===presetId?'selected':''}>${esc(c.name)}</option>`).join('')||`<option value="">— nenhum —</option>`;
   setCopyMode('agenda');$('#copyScrim').classList.add('on');
 }
@@ -2344,7 +2345,7 @@ function copyCampanhas(cid){
   document.body.removeChild(ta);
 }
 
-function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
+function refreshClientDatalist(){$('#clientList').innerHTML=state.clients.filter(c=>c.status!=='arquivado').sort((a,b)=>a.name.localeCompare(b.name,'pt')).map(c=>`<option value="${esc(c.name)}">`).join('');}
 
 /* ---------- 📊 Resultados (Painel Geral) — números vêm do robô do Meta na chave 'floow-painel' ---------- */
 const RESULT_STATUS=[
@@ -2442,7 +2443,7 @@ async function loadSaldos(){
   if(currentUser)render();
 }
 function saldoMin(){return Number(saldosCache&&saldosCache.minimo)||30;}
-function saldosBaixos(){const s=saldosCache;if(!s||!Array.isArray(s.contas))return [];const min=saldoMin();return s.contas.filter(c=>c.saldo!=null&&!c.cartao&&Number(c.saldo)<min);} // ignora contas de cartão
+function saldosBaixos(){const s=saldosCache;if(!s||!Array.isArray(s.contas))return [];const min=saldoMin();return s.contas.filter(c=>c.saldo!=null&&!c.cartao&&Number(c.saldo)<min&&!codeArchived(c.code));} // ignora cartão e clientes arquivados
 function contaDoCliente(code){const s=saldosCache;if(!s||!Array.isArray(s.contas)||!code)return null;return s.contas.find(c=>String(c.code)===String(code))||null;}
 function saldoDoCliente(code){const f=contaDoCliente(code);return (f&&f.saldo!=null)?Number(f.saldo):null;}
 function notifySaldoBaixo(){

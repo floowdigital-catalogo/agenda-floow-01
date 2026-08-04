@@ -688,8 +688,9 @@
     </div>
     <div>
       <label class="f">Status</label>
-      <select class="t" id="clStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select>
+      <select class="t" id="clStatus" onchange="toggleArchDate()"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select>
     </div>
+    <div id="clArchWrap" style="display:none"><label class="f">📅 Data de saída <span style="text-transform:none;color:var(--txt-faint)">(pra contar o churn do mês)</span></label><input class="t" type="date" id="clArch"></div>
     <label class="f">Gestor de Projetos</label>
     <select class="t" id="clOwner"></select>
     <label class="f">📁 Pasta no Google Drive <span style="text-transform:none;color:var(--txt-faint)">(link)</span></label>
@@ -1043,8 +1044,9 @@ function seed(){
 }
 
 /* ---------- helpers ---------- */
+function clientArchived(id){const c=id?clientById(id):null;return !!(c&&c.status==='arquivado');}
 function visibleEvents(){
-  let evs=state.events.slice();
+  let evs=state.events.filter(e=>!clientArchived(e.clientId)); // esconde demandas de clientes arquivados
   if(!canManage()){return evs.filter(e=>e.resp===myMember());}
   if(fClient)evs=evs.filter(e=>e.clientId===fClient);
   if(fResp)evs=evs.filter(e=>e.resp===fResp);
@@ -1162,7 +1164,7 @@ function setTab(t){if(t==='cal'&&tab!=='cal')view='day';tab=t;render();toggleSid
 /* ---------- dashboard (admin) ---------- */
 function renderDash(app){
   const today=iso(new Date());
-  const cs=state.clients, evs=state.events;
+  const cs=state.clients, evs=state.events.filter(e=>!clientArchived(e.clientId));
   const total=cs.length, ativos=cs.filter(c=>c.status==='ativo').length;
   const pend=evs.filter(e=>!e.done).length;
   const atras=evs.filter(e=>!e.done&&e.date<today).length;
@@ -1452,10 +1454,11 @@ function renderTasks(app){
   const itemHtml=(e,over)=>{const d=parseISO(e.date);const dd=`${pad(d.getDate())}/${pad(d.getMonth()+1)}`;
     return `<div class="tk${over?' over':''}" onclick="openEv('${e.id}')"><span class="tk-d">${over?'⚠ ':''}${dd}${fmtRange(e)?' · '+fmtRange(e):''}</span><span class="tk-t">${prioDot(e)}${typeOf(e.type).em} ${esc(e.title)}<span class="tk-c"> · ${esc(clientName(e.clientId))}</span></span></div>`;};
   const members=canManage()?state.users:state.users.filter(m=>m.id===myMember());
-  let totalOver=0;members.forEach(m=>{totalOver+=state.events.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;});
+  const evAtivos=state.events.filter(e=>!clientArchived(e.clientId)); // ignora demandas de clientes arquivados
+  let totalOver=0;members.forEach(m=>{totalOver+=evAtivos.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;});
   const head=`<div class="list-head">${canManage()?'Tarefas por usuário':'Suas tarefas'} · <b class="${totalOver?'bad':''}">${totalOver} atrasada${totalOver===1?'':'s'}</b></div>`;
   const panels=members.map(m=>{
-    const mine=state.events.filter(e=>e.resp===m.id);
+    const mine=evAtivos.filter(e=>e.resp===m.id);
     const overdue=mine.filter(e=>!e.done&&e.date<today).sort(byDate);
     const todo=mine.filter(e=>!e.done&&e.date>=today).sort(byDate);
     const doneCount=mine.filter(e=>e.done).length;
@@ -1933,17 +1936,35 @@ function renderClientGrid(){
   if(clientHealthFilter!=='all')list=list.filter(c=>clientSituacao(c)===clientHealthFilter);
   if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase();list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q));}
   list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
-  if(!list.length){wrap.innerHTML=`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
+  const head=(clientStatusFilter==='arquivado')?churnResumoHTML():'';
+  if(!list.length){wrap.innerHTML=head+`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
   const grid=document.createElement('div');grid.className='cgrid';
   grid.innerHTML=list.map(c=>{
     const nx=clientNext(c.id);const pend=clientPending(c.id);const hl=resultMeta(clientSituacao(c));
-    const nxTxt=nx?`Próx.: <b>${esc(typeOf(nx.type).label)}</b> · ${parseISO(nx.date).getDate()}/${pad(parseISO(nx.date).getMonth()+1)}`:'Sem tarefas futuras';
+    const nxTxt=(c.status==='arquivado')
+      ?(c.archivedAt?`📅 Saiu em <b>${String(c.archivedAt).split('-').reverse().join('/')}</b>`:'📅 Saída sem data registrada')
+      :(nx?`Próx.: <b>${esc(typeOf(nx.type).label)}</b> · ${parseISO(nx.date).getDate()}/${pad(parseISO(nx.date).getMonth()+1)}`:'Sem tarefas futuras');
     return `<div class="ccard" onclick="openClient('${c.id}')">
       <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span></div>
       <div class="cmeta"><span><span class="cdot" style="background:${respColor(c.owner)}"></span>${esc(respName(c.owner))}</span><span><b>${pend}</b> pend. · ${c.status}</span></div>
       <div class="cnext">${nxTxt}</div></div>`;
   }).join('');
-  wrap.innerHTML='';wrap.appendChild(grid);
+  wrap.innerHTML='';if(head)wrap.insertAdjacentHTML('beforeend',head);wrap.appendChild(grid);
+}
+/* 📉 resumo de churn: quantos clientes saíram por mês */
+function churnResumoHTML(){
+  const arq=state.clients.filter(c=>c.status==='arquivado');
+  const byMonth={};let semData=0;
+  arq.forEach(c=>{if(c.archivedAt){const k=String(c.archivedAt).slice(0,7);byMonth[k]=(byMonth[k]||0)+1;}else semData++;});
+  const MES=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  const keys=Object.keys(byMonth).sort().reverse();
+  const chips=keys.map(k=>{const p=k.split('-');return `<span class="saldo-chip">${MES[Number(p[1])-1]}/${p[0]} · <b>${byMonth[k]}</b></span>`;}).join('')
+    +(semData?`<span class="saldo-chip" style="opacity:.6">sem data · <b>${semData}</b></span>`:'');
+  return `<div class="panel">
+    <h3>📉 Clientes que saíram <span class="h3-side">${arq.length} no total</span></h3>
+    <div class="empty-hint">Quantos clientes você arquivou por mês. Ajuste a data no cliente se precisar.</div>
+    <div class="saldo-list" style="margin-top:10px">${chips||'<span class="empty-hint" style="margin:0">Nenhuma saída registrada ainda.</span>'}</div>
+  </div>`;
 }
 function parseClientLine(line){
   let s=line.trim();if(!s)return null;
@@ -1998,6 +2019,8 @@ function openClient(id){
   $('#clName').value=c.name||'';
   $('#clCode').value=c.code||'';
   $('#clStatus').value=c.status;
+  if($('#clArch'))$('#clArch').value=c.archivedAt||'';
+  toggleArchDate();
   $('#clOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===c.owner?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#clDrive').value=c.driveUrl||'';
   renderContactLine();
@@ -2020,9 +2043,13 @@ function saveClient(){
   const c=clientById(openClientId);if(!c)return;
   const newName=($('#clName').value||'').trim();if(newName)c.name=newName;
   c.code=($('#clCode').value||'').trim();
-  c.status=$('#clStatus').value;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
-  saveData();closeClient();render();toast('Cliente atualizado');
+  const antigo=c.status, novo=$('#clStatus').value;
+  if(novo==='arquivado')c.archivedAt=($('#clArch')&&$('#clArch').value)?$('#clArch').value:(c.archivedAt||iso(new Date())); // usa a data informada, ou mantém, ou hoje
+  else delete c.archivedAt;                                                                                                  // voltou a ativo/pausado → limpa
+  c.status=novo;c.owner=$('#clOwner').value;c.driveUrl=($('#clDrive').value||'').trim();touch(c);
+  saveData();closeClient();render();toast(novo==='arquivado'&&antigo!=='arquivado'?'Cliente arquivado — saída registrada 📅':'Cliente atualizado');
 }
+function toggleArchDate(){const w=$('#clArchWrap');if(w)w.style.display=($('#clStatus')&&$('#clStatus').value==='arquivado')?'':'none';}
 function normUrl(u){return /^https?:\/\//i.test(u)?u:'https://'+u;}
 function openClientDrive(){const u=($('#clDrive').value||'').trim();if(!u){toast('Cole o link da pasta primeiro');return;}window.open(normUrl(u),'_blank');}
 function openClientCardDrive(cid){const c=clientById(cid);if(c&&c.driveUrl)window.open(normUrl(c.driveUrl),'_blank');

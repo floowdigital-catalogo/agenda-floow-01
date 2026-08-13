@@ -995,13 +995,30 @@ async function saveData(){
   return saveChain;
 }
 // recarrega/mescla a agenda quando a aba volta ao foco (vê mudanças da equipe sem F5)
+let lastSyncAt=0;
 async function refreshFromCloud(){
   if(!currentUser||!state)return;
-  if(document.querySelector('.scrim.on'))return; // não interromper edição em modal
-  try{const r=await window.storage.get(STORE_KEY,true);if(r&&r.value){const remote=JSON.parse(r.value);state=mergeStates(remote,state);render();}}catch(e){}
+  if(document.querySelector('.scrim.on'))return;           // não interrompe edição em modal
+  const ae=document.activeElement;                          // não interrompe quem está digitando
+  if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;
+  try{
+    const r=await window.storage.get(STORE_KEY,true);
+    if(r&&r.value){
+      const remote=JSON.parse(r.value);
+      const before=JSON.stringify(state.events)+JSON.stringify(state.clients);
+      state=mergeStates(remote,state);
+      lastSyncAt=Date.now();
+      const after=JSON.stringify(state.events)+JSON.stringify(state.clients);
+      if(before!==after)render();                            // só redesenha se algo mudou
+      updateSyncChip();
+    }
+  }catch(e){}
 }
+function updateSyncChip(){const c=$('#syncChip');if(c&&lastSyncAt)c.textContent='🔄 atualizado agora';}
 window.addEventListener('focus',refreshFromCloud);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshFromCloud();});
+// puxa as mudanças da equipe sozinho a cada 15s (sem precisar de F5)
+setInterval(()=>{if(currentUser&&!document.hidden)refreshFromCloud();},15000);
 async function saveSession(){try{await window.storage.set(SESSION_KEY,JSON.stringify(currentUser?currentUser.id:null),false);}catch(e){}}
 function doLogin(){
   const email=$('#liEmail').value.trim().toLowerCase();const pass=$('#liPass').value;

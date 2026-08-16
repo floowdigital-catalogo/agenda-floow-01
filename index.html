@@ -1258,7 +1258,35 @@ const FREQ_LABEL={mensal:'Mensal',quinzenal:'Quinzenal',semanal:'Semanal',anual:
 function billingMonthly(b){if(!b||!b.value)return 0;const v=Number(b.value)||0;if(b.type==='avista')return 0;
   switch(b.frequency){case 'semanal':return v*4.33;case 'quinzenal':return v*2;case 'anual':return v/12;default:return v;}}
 function clientMonthly(c){if(c.billing&&c.billing.value)return billingMonthly(c.billing);return Number(c.contractValue)||0;}
-function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',category:'',type:'Fixa',value:0,obs:''});saveData();renderFinanceInner();}
+const EXPENSE_CATS=['Salário colaborador','Pró-labore','Ferramentas','Estrutura','Limpeza','Outros'];
+function daysInMonth(y,m){return new Date(y,m+1,0).getDate();}
+function nextPayDate(day){
+  if(!day)return null;const t=new Date();
+  const today=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+  let d=new Date(t.getFullYear(),t.getMonth(),Math.min(day,daysInMonth(t.getFullYear(),t.getMonth())));
+  if(d<today){const mo=t.getMonth()+1;d=new Date(t.getFullYear(),mo,Math.min(day,daysInMonth(t.getFullYear(),mo)));}
+  return {date:d,daysUntil:Math.round((d-today)/86400000)};
+}
+function paymentReminders(){
+  const out=[];
+  (state.expenses||[]).forEach(e=>{
+    const isSal=e.category==='Salário colaborador', temDois=isSal&&e.payDay2;
+    const val=Number(e.value)||0;
+    if(e.payDay){const nd=nextPayDate(Number(e.payDay));if(nd)out.push({desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay),label:temDois?'1ª parcela':'',val:temDois?val/2:val,daysUntil:nd.daysUntil});}
+    if(temDois){const nd=nextPayDate(Number(e.payDay2));if(nd)out.push({desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay2),label:'2ª parcela',val:val/2,daysUntil:nd.daysUntil});}
+  });
+  out.sort((a,b)=>a.daysUntil-b.daysUntil);
+  return out;
+}
+let paymentNotified=false;
+function notifyPaymentsToday(){
+  const due=paymentReminders().filter(r=>r.daysUntil===0);
+  if(!due.length||paymentNotified)return;paymentNotified=true;
+  if(('Notification' in window)&&Notification.permission==='granted'){
+    try{new Notification('💰 Pagamento vence HOJE ('+due.length+')',{body:due.slice(0,4).map(r=>r.desc+(r.label?' · '+r.label:'')).join('\n'),tag:'pagamento-hoje'});}catch(e){}
+  }
+}
+function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',category:'Outros',type:'Fixa',value:0,payDay:'',payDay2:'',obs:''});saveData();renderFinanceInner();}
 function setExpenseField(id,field,v){const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;e[field]=(field==='value')?(Number(v)||0):v;saveData();renderFinanceInner();}
 function removeExpense(id){state.expenses=(state.expenses||[]).filter(x=>x.id!==id);saveData();renderFinanceInner();}
 /* --- cobrança (modelo Asaas), guardada no app --- */
@@ -1313,22 +1341,39 @@ function renderFinanceInner(){
       <span class="fin-sum">${sum}</span>
       <button class="btn" onclick="openBilling('${c.id}')">Cobrança</button>
     </div>`;}).join('');
-  const expRow=e=>`
+  const expRow=e=>{
+    const isSal=e.category==='Salário colaborador';
+    return `
     <div class="cfg-card" style="padding:10px;margin-bottom:7px">
       <div style="display:flex;gap:8px;align-items:center">
-        <input class="t" value="${esc(e.desc)}" placeholder="Descrição" onchange="setExpenseField('${e.id}','desc',this.value)" style="flex:1">
+        <input class="t" value="${esc(e.desc)}" placeholder="Descrição (ex.: Fulano, Adobe...)" onchange="setExpenseField('${e.id}','desc',this.value)" style="flex:1">
         <input class="t" type="number" min="0" step="10" value="${e.value||''}" placeholder="0" onchange="setExpenseField('${e.id}','value',this.value)" style="width:120px">
         <button class="rm" onclick="removeExpense('${e.id}')">×</button>
       </div>
-      <div style="display:flex;gap:8px;margin-top:7px;flex-wrap:wrap">
-        <input class="t" value="${esc(e.category||'')}" placeholder="Categoria" onchange="setExpenseField('${e.id}','category',this.value)" style="flex:1;min-width:110px">
-        <select class="t" onchange="setExpenseField('${e.id}','type',this.value)" style="width:130px">
+      <div style="display:flex;gap:8px;margin-top:7px;flex-wrap:wrap;align-items:center">
+        <select class="t" onchange="setExpenseField('${e.id}','category',this.value)" style="flex:1;min-width:150px">
+          ${EXPENSE_CATS.map(k=>`<option value="${k}" ${((e.category||'Outros')===k)?'selected':''}>${k}</option>`).join('')}
+        </select>
+        <select class="t" onchange="setExpenseField('${e.id}','type',this.value)" style="width:120px">
           ${['Variável','Fixa','Pró-labore'].map(t=>`<option value="${t}" ${((e.type||'Fixa')===t)?'selected':''}>${t}</option>`).join('')}
         </select>
-        <input class="t" value="${esc(e.obs||'')}" placeholder="Observações" onchange="setExpenseField('${e.id}','obs',this.value)" style="flex:2;min-width:130px">
+        <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">📅 Dia <input class="t" type="number" min="1" max="31" value="${e.payDay||''}" placeholder="—" onchange="setExpenseField('${e.id}','payDay',this.value)" style="width:64px"></span>
+        ${isSal?`<span style="display:flex;align-items:center;gap:4px;white-space:nowrap">e Dia <input class="t" type="number" min="1" max="31" value="${e.payDay2||''}" placeholder="—" onchange="setExpenseField('${e.id}','payDay2',this.value)" style="width:64px" title="2ª data (pagamento dividido)"></span>`:''}
       </div>
-    </div>`;
+      <div style="margin-top:7px">
+        <input class="t" value="${esc(e.obs||'')}" placeholder="Observações" onchange="setExpenseField('${e.id}','obs',this.value)" style="width:100%">
+      </div>
+    </div>`;};
   const expRows=exps.length?exps.map(expRow).join(''):'<div class="empty-hint">Nenhuma despesa cadastrada.</div>';
+  const rem=paymentReminders();notifyPaymentsToday();
+  const remRows=rem.map(r=>{
+    const cor=r.daysUntil<=0?'#f2675c':(r.daysUntil<=3?'#f5b400':'#36d399');
+    const quando=r.daysUntil<0?'atrasado':(r.daysUntil===0?'HOJE ⚠️':(r.daysUntil===1?'amanhã':'em '+r.daysUntil+' dias'));
+    return `<div class="fin-row">
+      <span class="fin-name">${esc(r.desc)}${r.label?' · '+r.label:''} <span class="empty-hint" style="margin:0">(${esc(r.cat)})</span></span>
+      <span class="fin-sum" style="color:${cor};font-weight:600">📅 dia ${r.day} · ${quando}${r.val?' · '+fmtBRL(r.val):''}</span>
+    </div>`;}).join('');
+  const remPanel=`<div class="panel"><h3>🔔 Próximos pagamentos <span class="h3-side">${rem.filter(r=>r.daysUntil<=3).length} para os próximos dias</span></h3>${remRows||'<div class="empty-hint">Nenhum pagamento com data. Coloque o "📅 Dia" em cada despesa abaixo.</div>'}</div>`;
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:15px">
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
@@ -1336,6 +1381,7 @@ function renderFinanceInner(){
       <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
       <div class="metric ${margem<0?'alert':''}"><div class="mv">${margem.toFixed(0)}%</div><div class="ml">Margem de lucro</div></div>
     </div>
+    ${remPanel}
     <div class="panel">
       <h3>📊 Painel financeiro <span class="h3-side">${pagantes} pagante(s) · ticket médio ${fmtBRL(ticket)}</span></h3>
       <div class="day-summary" style="margin-bottom:14px">

@@ -1267,20 +1267,35 @@ function nextPayDate(day){
   if(d<today){const mo=t.getMonth()+1;d=new Date(t.getFullYear(),mo,Math.min(day,daysInMonth(t.getFullYear(),mo)));}
   return {date:d,daysUntil:Math.round((d-today)/86400000)};
 }
+function monthKey(d){d=d||new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+function payStatus(day,paidMonth){
+  const t=new Date();const today=t.getDate();
+  if(paidMonth===monthKey(t))return {paid:true,ord:3,daysUntil:null};        // pago este mês
+  const d=Math.min(day,daysInMonth(t.getFullYear(),t.getMonth()));
+  if(today>d)return {paid:false,ord:0,daysUntil:d-today};                     // atrasado
+  if(today===d)return {paid:false,ord:1,daysUntil:0};                          // vence hoje
+  return {paid:false,ord:2,daysUntil:d-today};                                 // próximo
+}
+function togglePago(id,which){
+  const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;
+  const mk=monthKey(),f=(which===2?'paid2':'paid');
+  e[f]=(e[f]===mk)?'':mk;                                                       // marca/desmarca o mês atual
+  saveData();renderFinanceInner();
+}
 function paymentReminders(){
   const out=[];
   (state.expenses||[]).forEach(e=>{
     const isSal=e.category==='Salário colaborador', temDois=isSal&&e.payDay2;
     const val=Number(e.value)||0;
-    if(e.payDay){const nd=nextPayDate(Number(e.payDay));if(nd)out.push({desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay),label:temDois?'1ª parcela':'',val:temDois?val/2:val,daysUntil:nd.daysUntil});}
-    if(temDois){const nd=nextPayDate(Number(e.payDay2));if(nd)out.push({desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay2),label:'2ª parcela',val:val/2,daysUntil:nd.daysUntil});}
+    if(e.payDay){const st=payStatus(Number(e.payDay),e.paid);out.push({id:e.id,which:1,desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay),label:temDois?'1ª parcela':'',val:temDois?val/2:val,...st});}
+    if(temDois){const st=payStatus(Number(e.payDay2),e.paid2);out.push({id:e.id,which:2,desc:e.desc||e.category||'Pagamento',cat:e.category||'',day:Number(e.payDay2),label:'2ª parcela',val:val/2,...st});}
   });
-  out.sort((a,b)=>a.daysUntil-b.daysUntil);
+  out.sort((a,b)=>a.ord-b.ord||(a.daysUntil||0)-(b.daysUntil||0));
   return out;
 }
 let paymentNotified=false;
 function notifyPaymentsToday(){
-  const due=paymentReminders().filter(r=>r.daysUntil===0);
+  const due=paymentReminders().filter(r=>!r.paid&&r.ord===1);
   if(!due.length||paymentNotified)return;paymentNotified=true;
   if(('Notification' in window)&&Notification.permission==='granted'){
     try{new Notification('💰 Pagamento vence HOJE ('+due.length+')',{body:due.slice(0,4).map(r=>r.desc+(r.label?' · '+r.label:'')).join('\n'),tag:'pagamento-hoje'});}catch(e){}
@@ -1367,13 +1382,20 @@ function renderFinanceInner(){
   const expRows=exps.length?exps.map(expRow).join(''):'<div class="empty-hint">Nenhuma despesa cadastrada.</div>';
   const rem=paymentReminders();notifyPaymentsToday();
   const remRows=rem.map(r=>{
-    const cor=r.daysUntil<=0?'#f2675c':(r.daysUntil<=3?'#f5b400':'#36d399');
-    const quando=r.daysUntil<0?'atrasado':(r.daysUntil===0?'HOJE ⚠️':(r.daysUntil===1?'amanhã':'em '+r.daysUntil+' dias'));
-    return `<div class="fin-row">
+    let badge,cor;
+    if(r.paid){badge='✅ Pago';cor='#36d399';}
+    else if(r.ord===0){badge='🔴 Atrasado '+(-r.daysUntil)+'d';cor='#f2675c';}
+    else if(r.ord===1){badge='🔴 Vence HOJE';cor='#f2675c';}
+    else{const soon=r.daysUntil<=3;badge=(soon?'🟡':'🟢')+' em '+r.daysUntil+' dia'+(r.daysUntil===1?'':'s');cor=soon?'#f5b400':'#36d399';}
+    return `<div class="fin-row"${r.paid?' style="opacity:.6"':''}>
       <span class="fin-name">${esc(r.desc)}${r.label?' · '+r.label:''} <span class="empty-hint" style="margin:0">(${esc(r.cat)})</span></span>
-      <span class="fin-sum" style="color:${cor};font-weight:600">📅 dia ${r.day} · ${quando}${r.val?' · '+fmtBRL(r.val):''}</span>
+      <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+        <span class="fin-sum" style="color:${cor};font-weight:600">📅 dia ${r.day} · ${badge}${r.val?' · '+fmtBRL(r.val):''}</span>
+        <button class="btn ${r.paid?'ghost':'primary'} opt-link" onclick="togglePago('${r.id}',${r.which})">${r.paid?'Desmarcar':'✓ Pago'}</button>
+      </span>
     </div>`;}).join('');
-  const remPanel=`<div class="panel"><h3>🔔 Próximos pagamentos <span class="h3-side">${rem.filter(r=>r.daysUntil<=3).length} para os próximos dias</span></h3>${remRows||'<div class="empty-hint">Nenhum pagamento com data. Coloque o "📅 Dia" em cada despesa abaixo.</div>'}</div>`;
+  const nAtras=rem.filter(r=>!r.paid&&r.ord===0).length, nPagos=rem.filter(r=>r.paid).length;
+  const remPanel=`<div class="panel"><h3>🔔 Pagamentos do mês <span class="h3-side">${nAtras?`🔴 ${nAtras} atrasado(s) · `:''}✅ ${nPagos} pago(s) · ${rem.length} no total</span></h3>${remRows||'<div class="empty-hint">Nenhum pagamento com data. Coloque o "📅 Dia" em cada despesa abaixo.</div>'}</div>`;
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:15px">
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>

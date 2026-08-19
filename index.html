@@ -1258,6 +1258,7 @@ const FREQ_LABEL={mensal:'Mensal',quinzenal:'Quinzenal',semanal:'Semanal',anual:
 function billingMonthly(b){if(!b||!b.value)return 0;const v=Number(b.value)||0;if(b.type==='avista')return 0;
   switch(b.frequency){case 'semanal':return v*4.33;case 'quinzenal':return v*2;case 'anual':return v/12;default:return v;}}
 function clientMonthly(c){if(c.billing&&c.billing.value)return billingMonthly(c.billing);return Number(c.contractValue)||0;}
+function clientFaturamento(c){const m=clientMonthly(c);if(m>0)return m;const a=(typeof asaasDoCliente==='function')?asaasDoCliente(c.code):null;return a?(Number(a.valor)||0):0;} // usa Asaas quando não há cobrança manual
 const EXPENSE_CATS=['Salário colaborador','Pró-labore','Ferramentas','Estrutura','Limpeza','Outros'];
 function daysInMonth(y,m){return new Date(y,m+1,0).getDate();}
 function nextPayDate(day){
@@ -1332,25 +1333,42 @@ function saveBilling(){
   if(firstDue)c.billingDay=parseISO(firstDue).getDate(); // p/ a notificação de cobrança
   touch(c);saveData();closeBilling();renderFinanceInner();toast('Cobrança salva ✓');
 }
-function renderFinance(app){app.insertAdjacentHTML('beforeend','<div id="financeWrap"></div>');renderFinanceInner();}
+/* ---------- 💳 Cobranças do Asaas (robô manda em 'floow-asaas', só leitura) ---------- */
+let asaasCache=null, asaasLoaded=false, asaasLoading=false;
+async function loadAsaas(){
+  if(asaasLoading)return; asaasLoading=true;
+  try{const r=await window.storage.get('floow-asaas',true);asaasCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
+  catch(e){asaasCache={clientes:[]};}
+  asaasLoaded=true;asaasLoading=false;
+  if(currentUser)render();
+}
+function asaasDoCliente(code){if(!asaasCache||!Array.isArray(asaasCache.clientes)||!code)return null;return asaasCache.clientes.find(a=>String(a.code)===String(code))||null;}
+const ASAAS_ST={atrasado:{em:'🔴',cor:'#f2675c',lbl:'Atrasado',ord:0},pendente:{em:'🟡',cor:'#f5b400',lbl:'Pendente',ord:1},pago:{em:'🟢',cor:'#36d399',lbl:'Pago',ord:2}};
+function asaasMeta(s){return ASAAS_ST[s]||{em:'⚪',cor:'var(--txt-faint)',lbl:s||'sem cobrança',ord:3};}
+function asaasBadge(a){
+  if(!a)return '';const m=asaasMeta(a.status);
+  const venc=a.vencimento?String(a.vencimento).split('-').reverse().join('/'):'';
+  return `<span style="color:${m.cor};font-weight:600" title="Status no Asaas">${m.em} ${m.lbl}${a.valor?' · '+fmtBRL(a.valor):''}${venc?' · vence '+venc:''}</span>`;
+}
+function renderFinance(app){app.insertAdjacentHTML('beforeend','<div id="financeWrap"></div>');if(!asaasLoaded&&!asaasLoading)loadAsaas();renderFinanceInner();}
 function renderFinanceInner(){
   const wrap=$('#financeWrap');if(!wrap)return;
   const cs=state.clients.filter(c=>c.status!=='arquivado').sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
-  const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+clientMonthly(c),0);
+  const mrr=cs.filter(c=>c.status==='ativo').reduce((s,c)=>s+clientFaturamento(c),0);
   const exps=state.expenses||[];
   const sumType=t=>exps.filter(e=>(e.type||'Fixa')===t).reduce((s,e)=>s+(Number(e.value)||0),0);
   const tVar=sumType('Variável'),tFix=sumType('Fixa'),tPro=sumType('Pró-labore');
   const despTotal=tVar+tFix+tPro;const lucro=mrr-despTotal;
-  const pagantes=cs.filter(c=>c.status==='ativo'&&clientMonthly(c)>0).length;
+  const pagantes=cs.filter(c=>c.status==='ativo'&&clientFaturamento(c)>0).length;
   const ticket=pagantes?mrr/pagantes:0;const margem=mrr>0?lucro/mrr*100:0;
   const byCat={};exps.forEach(e=>{const k=(e.category||'Outros').trim()||'Outros';byCat[k]=(byCat[k]||0)+(Number(e.value)||0);});
   const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);const maxCat=Math.max(1,...cats.map(c=>c[1]));
   const catRows=cats.map(([k,v])=>`<div class="loadrow"><span class="ln">${esc(k)}</span><div class="lbar"><span style="width:${v/maxCat*100}%;background:var(--brand)"></span></div><span class="ln-n">${fmtBRL(v)}</span></div>`).join('');
   const seg=(v,color,title)=>v>0?`<span style="width:${despTotal?v/despTotal*100:0}%;background:${color}" title="${title}"></span>`:'';
   const rows=cs.map(c=>{
-    const b=c.billing;const mv=clientMonthly(c);
+    const b=c.billing;const mv=clientMonthly(c);const a=asaasDoCliente(c.code);
     const extra=b?(b.type==='avista'?' · à vista':(b.frequency&&b.frequency!=='mensal'?' · '+(FREQ_LABEL[b.frequency]||b.frequency):''))+(b.firstDue?' · vence dia '+parseISO(b.firstDue).getDate():''):(c.billingDay?' · dia '+c.billingDay:'');
-    const sum=mv?`${fmtBRL(mv)}/mês${extra}`:'<span style="color:var(--txt-faint)">sem cobrança</span>';
+    const sum=mv?`${fmtBRL(mv)}/mês${extra}`:(a?asaasBadge(a):'<span style="color:var(--txt-faint)">sem cobrança</span>');
     return `<div class="fin-row">
       <span class="fin-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
       <span class="fin-sum">${sum}</span>
@@ -1396,6 +1414,22 @@ function renderFinanceInner(){
     </div>`;}).join('');
   const nAtras=rem.filter(r=>!r.paid&&r.ord===0).length, nPagos=rem.filter(r=>r.paid).length;
   const remPanel=`<div class="panel"><h3>🔔 Pagamentos do mês <span class="h3-side">${nAtras?`🔴 ${nAtras} atrasado(s) · `:''}✅ ${nPagos} pago(s) · ${rem.length} no total</span></h3>${remRows||'<div class="empty-hint">Nenhum pagamento com data. Coloque o "📅 Dia" em cada despesa abaixo.</div>'}</div>`;
+  // 💳 Cobranças do Asaas (recebimento dos clientes)
+  const asaasList=(asaasCache&&Array.isArray(asaasCache.clientes))?asaasCache.clientes:[];
+  const asAtras=asaasList.filter(a=>a.status==='atrasado').length, asPend=asaasList.filter(a=>a.status==='pendente').length, asPago=asaasList.filter(a=>a.status==='pago').length;
+  const asT=asaasList.reduce((o,a)=>{const v=Number(a.valor)||0;if(a.status==='pago')o.pago+=v;else if(a.status==='pendente')o.pend+=v;else if(a.status==='atrasado')o.atr+=v;return o;},{pago:0,pend:0,atr:0});
+  const asaasRows=asaasList.slice().sort((a,b)=>asaasMeta(a.status).ord-asaasMeta(b.status).ord||String(a.name||'').localeCompare(String(b.name||''),'pt')).map(a=>`<div class="fin-row">
+      <span class="fin-name">${a.code?'#'+esc(String(a.code))+' ':''}${esc((a.name||'').replace(/#\s*\d+\s*[|]?\s*/,'').trim()||a.name||'')}</span>
+      <span class="fin-sum">${asaasBadge(a)}</span>
+    </div>`).join('');
+  const asaasWhen=(asaasCache&&asaasCache.updatedAt)?new Date(asaasCache.updatedAt):null;
+  const asaasPanel=asaasLoaded&&asaasList.length?`<div class="panel"><h3>💳 Recebimentos (Asaas) <span class="h3-side">🔴 ${asAtras} atrasado(s) · 🟡 ${asPend} pendente(s) · 🟢 ${asPago} pago(s)</span></h3>
+      <div class="day-summary" style="margin-bottom:14px">
+        <div>🟢 Recebido: <b style="color:#36d399">${fmtBRL(asT.pago)}</b> · 🟡 A receber: <b style="color:#f5b400">${fmtBRL(asT.pend)}</b></div>
+        <div>${asT.atr>0?`🔴 Atrasado: <b style="color:#f2675c">${fmtBRL(asT.atr)}</b> — cobrar!`:'<b style="color:#36d399">Nada atrasado ✓</b>'}</div>
+      </div>
+      ${asaasRows}${asaasWhen?`<div class="empty-hint" style="margin-top:8px">Direto do Asaas · atualizado ${pad(asaasWhen.getDate())}/${pad(asaasWhen.getMonth()+1)} ${pad(asaasWhen.getHours())}:${pad(asaasWhen.getMinutes())}</div>`:''}</div>`
+    :(asaasLoaded?`<div class="panel"><h3>💳 Recebimentos (Asaas)</h3><div class="empty-hint">Sem dados do Asaas ainda. Rode <b>syncAsaas</b> no robô.</div></div>`:'');
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:15px">
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
@@ -1403,6 +1437,7 @@ function renderFinanceInner(){
       <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
       <div class="metric ${margem<0?'alert':''}"><div class="mv">${margem.toFixed(0)}%</div><div class="ml">Margem de lucro</div></div>
     </div>
+    ${asaasPanel}
     ${remPanel}
     <div class="panel">
       <h3>📊 Painel financeiro <span class="h3-side">${pagantes} pagante(s) · ticket médio ${fmtBRL(ticket)}</span></h3>

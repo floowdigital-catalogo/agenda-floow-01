@@ -686,6 +686,16 @@
       <div style="flex:2"><label class="f">Nome</label><input class="t" id="clName"></div>
       <div><label class="f">Código</label><input class="t" id="clCode" placeholder="Ex: 67"></div>
     </div>
+    <div class="two">
+      <div>
+        <label class="f">📷 Instagram</label>
+        <div style="display:flex;gap:8px">
+          <input class="t" id="clIg" placeholder="@brizzonjeans">
+          <button class="btn" onclick="openClientIg()" title="Abrir o perfil no Instagram">Abrir</button>
+        </div>
+      </div>
+      <div><label class="f">🏷️ Segmento</label><input class="t" id="clSeg" list="segList" placeholder="Ex: Moda feminina"></div>
+    </div>
     <div>
       <label class="f">Status</label>
       <select class="t" id="clStatus" onchange="toggleArchDate()"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select>
@@ -734,6 +744,22 @@
   </div>
 </div>
 
+<!-- sugestões de segmento (o campo aceita qualquer texto) -->
+<datalist id="segList">
+  <option value="Moda feminina"></option>
+  <option value="Moda masculina"></option>
+  <option value="Moda infantil"></option>
+  <option value="Moda praia"></option>
+  <option value="Moda fitness"></option>
+  <option value="Moda plus size"></option>
+  <option value="Moda íntima / lingerie"></option>
+  <option value="Loja multimarcas"></option>
+  <option value="Calçados"></option>
+  <option value="Acessórios e semijoias"></option>
+  <option value="Beleza e estética"></option>
+  <option value="Outro"></option>
+</datalist>
+
 <!-- Add client (detailed) modal -->
 <div class="scrim" id="addScrim">
   <div class="modal">
@@ -741,6 +767,10 @@
     <label class="f">Nome</label>
     <input class="t" id="aName" placeholder="Ex: Brizzon Jeans" onkeydown="if(event.key==='Enter')saveAdd()">
     <div><label class="f">Código <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aCode" placeholder="Ex: 67"></div>
+    <div class="two">
+      <div><label class="f">📷 Instagram <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aIg" placeholder="@brizzonjeans"></div>
+      <div><label class="f">🏷️ Segmento <span style="text-transform:none;color:var(--txt-faint)">(opc.)</span></label><input class="t" id="aSeg" list="segList" placeholder="Ex: Moda feminina"></div>
+    </div>
     <div class="two">
       <div><label class="f">Status</label><select class="t" id="aStatus"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="arquivado">Arquivado</option></select></div>
       <div><label class="f">Gestor de Projetos</label><select class="t" id="aOwner"></select></div>
@@ -2055,7 +2085,7 @@ function renderClientGrid(){
   if(clientStatusFilter==='ativos')list=list.filter(c=>c.status!=='arquivado'); // padrão: esconde arquivados
   else if(clientStatusFilter!=='all')list=list.filter(c=>c.status===clientStatusFilter);
   if(clientHealthFilter!=='all')list=list.filter(c=>clientSituacao(c)===clientHealthFilter);
-  if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase();list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q));}
+  if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase().replace(/^@/,'');list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q)||(c.instagram||'').toLowerCase().includes(q)||(c.segment||'').toLowerCase().includes(q));}
   list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
   const head=(clientStatusFilter==='arquivado')?churnResumoHTML():'';
   if(!list.length){wrap.innerHTML=head+`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
@@ -2066,8 +2096,9 @@ function renderClientGrid(){
       ?(c.archivedAt?`📅 Saiu em <b>${String(c.archivedAt).split('-').reverse().join('/')}</b>`:'📅 Saída sem data registrada')
       :(nx?`Próx.: <b>${esc(typeOf(nx.type).label)}</b> · ${parseISO(nx.date).getDate()}/${pad(parseISO(nx.date).getMonth()+1)}`:'Sem tarefas futuras');
     return `<div class="ccard" onclick="openClient('${c.id}')">
-      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span></div>
+      <div class="ctop">${c.code?`<span class="ccode">#${esc(c.code)}</span>`:''}<span class="cname">${esc(c.name)}</span>${c.instagram?`<span class="ccode" style="cursor:pointer" title="Abrir @${esc(c.instagram)} no Instagram" onclick="event.stopPropagation();openClientCardIg('${c.id}')">📷</span>`:''}${c.driveUrl?`<span class="ccode" style="cursor:pointer" title="Abrir pasta do Drive" onclick="event.stopPropagation();openClientCardDrive('${c.id}')">📁</span>`:''}<span class="hbadge" style="--h:${hl.color}">${hl.em} ${hl.label}</span></div>
       <div class="cmeta"><span><span class="cdot" style="background:${respColor(c.owner)}"></span>${esc(respName(c.owner))}</span><span><b>${pend}</b> pend. · ${c.status}</span></div>
+      ${(c.segment||c.instagram)?`<div class="cmeta" style="margin-top:2px">${c.segment?`<span title="Segmento">🏷️ ${esc(c.segment)}</span>`:'<span></span>'}${c.instagram?`<span title="Instagram">@${esc(c.instagram)}</span>`:''}</div>`:''}
       <div class="cnext">${nxTxt}</div></div>`;
   }).join('');
   wrap.innerHTML='';if(head)wrap.insertAdjacentHTML('beforeend',head);wrap.appendChild(grid);
@@ -2097,6 +2128,7 @@ function parseClientLine(line){
 /* detailed add modal */
 function openAdd(){
   $('#aName').value='';$('#aCode').value='';$('#aStatus').value='ativo';
+  $('#aIg').value='';$('#aSeg').value='';
   $('#aOwner').innerHTML=adminUsers().map(m=>`<option value="${m.id}" ${m.id===pmId()?'selected':''}>${esc(m.name)}</option>`).join('');
   $('#addScrim').classList.add('on');setTimeout(()=>$('#aName').focus(),30);
 }
@@ -2106,7 +2138,7 @@ function saveAdd(){
   const name=$('#aName').value.trim();if(!name){toast('Digite o nome');return;}
   const ex=state.clients.find(c=>c.name.toLowerCase()===name.toLowerCase());
   if(ex){toast('Cliente já existe');closeAdd();openClient(ex.id);return;}
-  const c={id:uid(),code:$('#aCode').value.trim(),name,status:$('#aStatus').value,health:'iniciante',owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
+  const c={id:uid(),code:$('#aCode').value.trim(),name,instagram:normIg($('#aIg').value),segment:($('#aSeg').value||'').trim(),status:$('#aStatus').value,health:'iniciante',owner:$('#aOwner').value,checklist:newChecklist(),updatedAt:Date.now()};
   state.clients.push(c);saveData();closeAdd();render();openClient(c.id);createClientDriveFolders(c);toast('Cliente cadastrado ✓');
 }
 /* bulk import modal */
@@ -2139,6 +2171,8 @@ function openClient(id){
   $('#clTitle').childNodes[0].nodeValue=(c.code?'#'+c.code+' · ':'')+c.name+' ';
   $('#clName').value=c.name||'';
   $('#clCode').value=c.code||'';
+  if($('#clIg'))$('#clIg').value=c.instagram?'@'+c.instagram:'';
+  if($('#clSeg'))$('#clSeg').value=c.segment||'';
   $('#clStatus').value=c.status;
   if($('#clArch'))$('#clArch').value=c.archivedAt||'';
   toggleArchDate();
@@ -2164,6 +2198,8 @@ function saveClient(){
   const c=clientById(openClientId);if(!c)return;
   const newName=($('#clName').value||'').trim();if(newName)c.name=newName;
   c.code=($('#clCode').value||'').trim();
+  c.instagram=normIg($('#clIg')?$('#clIg').value:'');
+  c.segment=($('#clSeg')?$('#clSeg').value:'').trim();
   const antigo=c.status, novo=$('#clStatus').value;
   if(novo==='arquivado')c.archivedAt=($('#clArch')&&$('#clArch').value)?$('#clArch').value:(c.archivedAt||iso(new Date())); // usa a data informada, ou mantém, ou hoje
   else delete c.archivedAt;                                                                                                  // voltou a ativo/pausado → limpa
@@ -2172,6 +2208,16 @@ function saveClient(){
 }
 function toggleArchDate(){const w=$('#clArchWrap');if(w)w.style.display=($('#clStatus')&&$('#clStatus').value==='arquivado')?'':'none';}
 function normUrl(u){return /^https?:\/\//i.test(u)?u:'https://'+u;}
+/* 📷 Instagram: aceita "@loja", "loja" ou o link completo — guarda só o @ (sem arroba) */
+function normIg(v){
+  let s=(v||'').trim();if(!s)return '';
+  s=s.replace(/^https?:\/\//i,'').replace(/^www\./i,'').replace(/^instagram\.com\//i,'');
+  s=s.replace(/^@/,'').replace(/[\/?#].*$/,'').trim();
+  return s;
+}
+function igUrl(h){return 'https://instagram.com/'+normIg(h);}
+function openClientIg(){const h=normIg($('#clIg')?$('#clIg').value:'');if(!h){toast('Digite o @ do Instagram primeiro');return;}window.open(igUrl(h),'_blank');}
+function openClientCardIg(cid){const c=clientById(cid);if(c&&c.instagram)window.open(igUrl(c.instagram),'_blank');}
 function openClientDrive(){const u=($('#clDrive').value||'').trim();if(!u){toast('Cole o link da pasta primeiro');return;}window.open(normUrl(u),'_blank');}
 function openClientCardDrive(cid){const c=clientById(cid);if(c&&c.driveUrl)window.open(normUrl(c.driveUrl),'_blank');
 }

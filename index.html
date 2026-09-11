@@ -1250,7 +1250,7 @@ function renderDash(app){
         <div class="metric ${atras?'alert':''}"><div class="mv">${atras}</div><div class="ml">Demandas atrasadas</div></div>
         <div class="metric ${optVenc?'alert':''}" style="cursor:pointer" onclick="setTab('otim')"><div class="mv">${optVenc}</div><div class="ml">Otimizações vencidas</div></div>
       </div>
-      <div class="panel"><h3>Saúde dos projetos</h3>
+      <div class="panel"><h3>Saúde dos projetos <span class="h3-side">pelos pedidos da semana</span></h3>
         <div class="health-bar">${segs||'<span style="width:100%;background:var(--surface-2)"></span>'}</div>
         <div class="hleg">${leg}</div></div>
       <div class="panel">
@@ -1333,7 +1333,18 @@ function notifyPaymentsToday(){
   }
 }
 function addExpense(){if(!state.expenses)state.expenses=[];state.expenses.push({id:uid(),desc:'',category:'Outros',type:'Fixa',value:0,payDay:'',payDay2:'',obs:''});saveData();renderFinanceInner();}
-function setExpenseField(id,field,v){const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;e[field]=(field==='value')?(Number(v)||0):v;saveData();renderFinanceInner();}
+function setExpenseField(id,field,v){
+  const e=(state.expenses||[]).find(x=>x.id===id);if(!e)return;
+  e[field]=(field==='value')?(Number(v)||0):v;
+  saveData();                                        // já salva sozinho (nada se perde)
+  if(field==='category'){renderFinanceInner();return;} // muda o cartão (salário tem 2 datas)
+  marcarDespesaAlterada();                           // totais só atualizam ao clicar em Salvar
+}
+function marcarDespesaAlterada(){
+  const b=$('#expSave');if(b){b.classList.remove('ghost');b.classList.add('primary');b.textContent='💾 Salvar alterações';}
+  const h=$('#expHint');if(h)h.textContent='Alterado — clique em Salvar para atualizar os totais';
+}
+function salvarDespesas(){saveData();renderFinanceInner();toast('Despesas salvas ✓');}
 function removeExpense(id){state.expenses=(state.expenses||[]).filter(x=>x.id!==id);saveData();renderFinanceInner();}
 /* --- cobrança (modelo Asaas), guardada no app --- */
 let billClientId=null, billType='assinatura', billMethods=[];
@@ -1395,15 +1406,6 @@ function renderFinanceInner(){
   const cats=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);const maxCat=Math.max(1,...cats.map(c=>c[1]));
   const catRows=cats.map(([k,v])=>`<div class="loadrow"><span class="ln">${esc(k)}</span><div class="lbar"><span style="width:${v/maxCat*100}%;background:var(--brand)"></span></div><span class="ln-n">${fmtBRL(v)}</span></div>`).join('');
   const seg=(v,color,title)=>v>0?`<span style="width:${despTotal?v/despTotal*100:0}%;background:${color}" title="${title}"></span>`:'';
-  const rows=cs.map(c=>{
-    const b=c.billing;const mv=clientMonthly(c);const a=asaasDoCliente(c.code);
-    const extra=b?(b.type==='avista'?' · à vista':(b.frequency&&b.frequency!=='mensal'?' · '+(FREQ_LABEL[b.frequency]||b.frequency):''))+(b.firstDue?' · vence dia '+parseISO(b.firstDue).getDate():''):(c.billingDay?' · dia '+c.billingDay:'');
-    const sum=mv?`${fmtBRL(mv)}/mês${extra}`:(a?asaasBadge(a):'<span style="color:var(--txt-faint)">sem cobrança</span>');
-    return `<div class="fin-row">
-      <span class="fin-name">${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}${c.status!=='ativo'?` <span class="tag">${esc(c.status)}</span>`:''}</span>
-      <span class="fin-sum">${sum}</span>
-      <button class="btn" onclick="openBilling('${c.id}')">Cobrança</button>
-    </div>`;}).join('');
   const expRow=e=>{
     const isSal=e.category==='Salário colaborador';
     return `
@@ -1444,22 +1446,7 @@ function renderFinanceInner(){
     </div>`;}).join('');
   const nAtras=rem.filter(r=>!r.paid&&r.ord===0).length, nPagos=rem.filter(r=>r.paid).length;
   const remPanel=`<div class="panel"><h3>🔔 Pagamentos do mês <span class="h3-side">${nAtras?`🔴 ${nAtras} atrasado(s) · `:''}✅ ${nPagos} pago(s) · ${rem.length} no total</span></h3>${remRows||'<div class="empty-hint">Nenhum pagamento com data. Coloque o "📅 Dia" em cada despesa abaixo.</div>'}</div>`;
-  // 💳 Cobranças do Asaas (recebimento dos clientes)
-  const asaasList=(asaasCache&&Array.isArray(asaasCache.clientes))?asaasCache.clientes:[];
-  const asAtras=asaasList.filter(a=>a.status==='atrasado').length, asPend=asaasList.filter(a=>a.status==='pendente').length, asPago=asaasList.filter(a=>a.status==='pago').length;
-  const asT=asaasList.reduce((o,a)=>{const v=Number(a.valor)||0;if(a.status==='pago')o.pago+=v;else if(a.status==='pendente')o.pend+=v;else if(a.status==='atrasado')o.atr+=v;return o;},{pago:0,pend:0,atr:0});
-  const asaasRows=asaasList.slice().sort((a,b)=>asaasMeta(a.status).ord-asaasMeta(b.status).ord||String(a.name||'').localeCompare(String(b.name||''),'pt')).map(a=>`<div class="fin-row">
-      <span class="fin-name">${a.code?'#'+esc(String(a.code))+' ':''}${esc((a.name||'').replace(/#\s*\d+\s*[|]?\s*/,'').trim()||a.name||'')}</span>
-      <span class="fin-sum">${asaasBadge(a)}</span>
-    </div>`).join('');
-  const asaasWhen=(asaasCache&&asaasCache.updatedAt)?new Date(asaasCache.updatedAt):null;
-  const asaasPanel=asaasLoaded&&asaasList.length?`<div class="panel"><h3>💳 Recebimentos (Asaas) <span class="h3-side">🔴 ${asAtras} atrasado(s) · 🟡 ${asPend} pendente(s) · 🟢 ${asPago} pago(s)</span></h3>
-      <div class="day-summary" style="margin-bottom:14px">
-        <div>🟢 Recebido: <b style="color:#36d399">${fmtBRL(asT.pago)}</b> · 🟡 A receber: <b style="color:#f5b400">${fmtBRL(asT.pend)}</b></div>
-        <div>${asT.atr>0?`🔴 Atrasado: <b style="color:#f2675c">${fmtBRL(asT.atr)}</b> — cobrar!`:'<b style="color:#36d399">Nada atrasado ✓</b>'}</div>
-      </div>
-      ${asaasRows}${asaasWhen?`<div class="empty-hint" style="margin-top:8px">Direto do Asaas · atualizado ${pad(asaasWhen.getDate())}/${pad(asaasWhen.getMonth()+1)} ${pad(asaasWhen.getHours())}:${pad(asaasWhen.getMinutes())}</div>`:''}</div>`
-    :(asaasLoaded?`<div class="panel"><h3>💳 Recebimentos (Asaas)</h3><div class="empty-hint">Sem dados do Asaas ainda. Rode <b>syncAsaas</b> no robô.</div></div>`:'');
+  // Removidos a pedido do Eduardo: "💳 Recebimentos (Asaas)" e "Cobranças por cliente".
   wrap.innerHTML=`
     <div class="metrics" style="margin-bottom:15px">
       <div class="metric"><div class="mv" style="color:var(--ok)">${fmtBRL(mrr)}</div><div class="ml">Faturamento mensal (clientes ativos)</div></div>
@@ -1467,7 +1454,6 @@ function renderFinanceInner(){
       <div class="metric ${lucro<0?'alert':''}"><div class="mv">${fmtBRL(lucro)}</div><div class="ml">Lucro estimado</div></div>
       <div class="metric ${margem<0?'alert':''}"><div class="mv">${margem.toFixed(0)}%</div><div class="ml">Margem de lucro</div></div>
     </div>
-    ${asaasPanel}
     ${remPanel}
     <div class="panel">
       <h3>📊 Painel financeiro <span class="h3-side">${pagantes} pagante(s) · ticket médio ${fmtBRL(ticket)}</span></h3>
@@ -1485,10 +1471,14 @@ function renderFinanceInner(){
       <div class="cfg-dem-lbl" style="margin-top:16px">Despesas por categoria</div>
       ${catRows||'<div class="empty-hint">Sem despesas.</div>'}
     </div>
-    <div class="panel"><h3>Cobranças por cliente <span class="h3-side">clique em "Cobrança" para configurar</span></h3>${rows||'<div class="empty-hint">Nenhum cliente.</div>'}</div>
     <div class="panel"><h3>Despesas mensais <span class="h3-side">total ${fmtBRL(despTotal)}</span></h3>
       ${expRows}
-      <button class="btn ghost cfg-add" onclick="addExpense()" style="margin-top:10px">+ Adicionar despesa</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+        <button class="btn ghost cfg-add" onclick="addExpense()" style="margin:0">+ Adicionar despesa</button>
+        <div class="spacer"></div>
+        <span class="empty-hint" id="expHint" style="margin:0">Tudo salvo ✓</span>
+        <button class="btn ghost" id="expSave" onclick="salvarDespesas()">💾 Salvar</button>
+      </div>
       <div class="fin-resumo">
         <span>Variáveis <b>${fmtBRL(tVar)}</b></span>
         <span>Fixas <b>${fmtBRL(tFix)}</b></span>
@@ -2641,26 +2631,41 @@ function setPainelPeriod(p){painelPeriod=p;renderResultadosInner();}
 function setPainelCustom(){painelFrom=$('#pFrom').value;painelTo=$('#pTo').value;if(painelFrom&&painelTo)renderResultadosInner();}
 function painelPeriodLabel(){const r=painelRange();if(!r)return 'mostrando o total acumulado';return `mostrando ${r.from.split('-').reverse().join('/')} até ${r.to.split('-').reverse().join('/')}`;}
 function resultCfg(){return {
-  lucroExc:Number(state.painelLucroExc)||2,                                  // lucro ≥ 2× investido = Excelente
-  lucroBom:Number(state.painelLucroBom)||1.2,                                // lucro ≥ 1,2× investido = Bom
-  lucroObs:Number(state.painelLucroObs)||0.8,                                // lucro ≥ 0,8× investido = Observação (empate)
+  pedBom:(state.painelPedBom!=null?Number(state.painelPedBom):4),            // a partir de 4 pedidos = 🔵 Bom
+  pedExc:(state.painelPedExc!=null?Number(state.painelPedExc):7),            // acima de 7 pedidos = 🟢 Excelente
   custoBom:(state.painelCustoBom!=null?Number(state.painelCustoBom):1.0),    // conversa abaixo disso = boa
   custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5), // conversa acima disso = cara
-  margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem%
+  margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem% (só a coluna Lucro)
 };}
+/* Situação pela QUANTIDADE DE PEDIDOS: 0 → 🔴 ruim · 1 a 3 → 🟡 observação · 4 a 7 → 🔵 bom · 8+ → 🟢 excelente */
 function resultAuto(m,cfg){
   if(!m)return 'sem';
-  const inv=Number(m.investido)||0,fat=Number(m.faturamento)||0,conv=Number(m.conversas)||0;
-  if(inv<=0&&fat<=0&&conv<=0)return 'sem';      // sem dados
-  if(fat<=0)return 'ruim';                       // não vendeu
-  const lucro=fat*(cfg.margem/100);
-  if(inv<=0)return 'excelente';                  // vendeu sem gastar em anúncio
-  const r=lucro/inv;                             // quantas vezes o lucro cobre o investido
-  if(r>=cfg.lucroExc)return 'excelente';
-  if(r>=cfg.lucroBom)return 'bom';
-  if(r>=cfg.lucroObs)return 'observacao';
-  return 'ruim';                                 // lucro < investido = prejuízo
+  const inv=Number(m.investido)||0,fat=Number(m.faturamento)||0,conv=Number(m.conversas)||0,ped=Number(m.vendas)||0;
+  if(ped<=0&&inv<=0&&fat<=0&&conv<=0)return 'sem'; // nem rodou nem lançou nada = sem dados
+  if(ped<=0)return 'ruim';                          // não vendeu
+  if(ped<cfg.pedBom)return 'observacao';            // abaixo do mínimo (padrão: 1 a 3)
+  if(ped<=cfg.pedExc)return 'bom';                  // padrão: 4 a 7
+  return 'excelente';                               // padrão: 8 ou mais
 }
+/* A saúde é SEMPRE de uma semana (domingo → sábado). Como o robô só grava o painel na sexta,
+   vale a semana atual quando ela já tem dados; senão, a última semana que tem. */
+function semanaAtual(){const s=startOfWeek(new Date()),e=new Date(s);e.setDate(s.getDate()+6);return {from:iso(s),to:iso(e)};}
+function semanaDeResultado(code){
+  const s0=startOfWeek(new Date());
+  for(let i=0;i<8;i++){                                   // olha até 8 semanas pra trás
+    const s=new Date(s0);s.setDate(s0.getDate()-7*i);
+    const e=new Date(s);e.setDate(s.getDate()+6);
+    const from=iso(s),to=iso(e);
+    const m=code?aggClientRange(code,from,to):null;
+    if(m&&((Number(m.vendas)||0)>0||(Number(m.investido)||0)>0||(Number(m.conversas)||0)>0))return {from,to,m,atual:i===0};
+  }
+  const r=semanaAtual();
+  return {from:r.from,to:r.to,m:(code?aggClientRange(code,r.from,r.to):null),atual:true};
+}
+function metricsSemana(code){return semanaDeResultado(code).m;}
+function pedidosSemana(code){const m=metricsSemana(code);return m?(Number(m.vendas)||0):null;}
+function faixaSemana(from,to){return from.split('-').reverse().slice(0,2).join('/')+' a '+to.split('-').reverse().slice(0,2).join('/');}
+function semanaLabel(){const r=semanaAtual();return faixaSemana(r.from,r.to);}
 function custoNivel(custo,cfg){
   if(custo==null)return {label:'',color:'var(--txt)'};
   if(custo<cfg.custoBom)return {label:'bom',color:'#36d399'};
@@ -2668,13 +2673,12 @@ function custoNivel(custo,cfg){
   return {label:'médio',color:'#f5b400'};
 }
 function resultFinal(c,m,cfg){return (c.resultStatus&&c.resultStatus!=='auto')?c.resultStatus:resultAuto(m,cfg);}
-function clientSituacao(c){if(!c)return 'sem';return resultFinal(c,metricsFor(c.code),resultCfg());} // situação do cliente = diagnóstico da aba Resultados (no período selecionado)
+function clientSituacao(c){if(!c)return 'sem';return resultFinal(c,metricsSemana(c.code),resultCfg());} // saúde do cliente = pedidos DESTA SEMANA (não muda com o filtro de período)
 function setResultStatus(cid,val){const c=clientById(cid);if(!c)return;c.resultStatus=val;touch(c);saveData();renderResultadosInner();}
 function setResultNote(cid,val){const c=clientById(cid);if(!c)return;c.resultNote=val;touch(c);saveData();}
 function setPainelCfg(){
-  state.painelLucroExc=Number($('#pLucroExc').value)||2;
-  state.painelLucroBom=Number($('#pLucroBom').value)||1.2;
-  state.painelLucroObs=Number($('#pLucroObs').value)||0.8;
+  state.painelPedBom=Number($('#pPedBom').value)||4;
+  state.painelPedExc=Number($('#pPedExc').value)||7;
   state.painelCustoBom=Number($('#pCustoBom').value)||1;
   state.painelCustoCaro=Number($('#pCustoCaro').value)||1.5;
   state.painelMargem=Number($('#pMargem').value)||20;
@@ -2687,7 +2691,8 @@ function renderResultadosInner(){
   const cfg=resultCfg();
   if(!painelLoaded){wrap.innerHTML='<div class="panel"><div class="empty-hint" style="padding:18px">Carregando resultados…</div></div>';return;}
   const when=(painelCache&&painelCache.updatedAt)?new Date(painelCache.updatedAt):null;
-  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=metricsFor(c.code);return {c,m,st:resultFinal(c,m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
+  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=metricsFor(c.code);const sr=semanaDeResultado(c.code);
+    return {c,m,sr,ped:sr.m?(Number(sr.m.vendas)||0):null,st:resultFinal(c,sr.m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
   const cnt={};RESULT_STATUS.forEach(s=>cnt[s.id]=0);rows.forEach(r=>cnt[r.st]++);
   const chips=RESULT_STATUS.map(s=>`<span class="it"><span class="dot" style="background:${s.color}"></span>${s.em} ${s.label} <b>${cnt[s.id]}</b></span>`).join('');
   rows.sort((a,b)=>resultMeta(a.st).ord-resultMeta(b.st).ord||(a.c.name||'').localeCompare(b.c.name||'','pt'));
@@ -2705,7 +2710,8 @@ function renderResultadosInner(){
     return `<tr>
       <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
       <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
-      <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</td>
+      <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}
+        <div class="empty-hint" style="margin:2px 0 0;font-size:11px">${r.ped==null?'sem dados':r.ped+' pedido'+(r.ped===1?'':'s')+' · '+(r.sr.atual?'esta semana':'sem. '+faixaSemana(r.sr.from,r.sr.to))}</div></td>
       <td>${optSel(r.c)}</td>
       <td>${relatorioDoCliente(r.c.code)?`<button class="btn ghost opt-link" onclick="copiarRelatorio('${esc(r.c.code)}')" title="Copiar relatório da última semana">📋 Copiar</button>`:'<span style="color:var(--txt-faint)">—</span>'}${(r.m&&Number(r.m.faturamento)>0)?` <button class="btn ghost opt-link" onclick="celebrar('${r.c.id}')" title="Gerar mensagem de comemoração">🎉</button>`:''}</td>
       <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
@@ -2725,12 +2731,12 @@ function renderResultadosInner(){
       </div>
       <div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
         <div>
-          <div class="cfg-dem-lbl">🎯 Situação — quantas vezes o lucro cobre o investido</div>
+          <div class="cfg-dem-lbl">🎯 Situação — pedidos na semana (${semanaLabel()})</div>
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            🟢 Excelente ≥ <input class="t" id="pLucroExc" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroExc}" onchange="setPainelCfg()">x
-            · 🔵 Bom ≥ <input class="t" id="pLucroBom" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroBom}" onchange="setPainelCfg()">x
-            · 🟡 Observação ≥ <input class="t" id="pLucroObs" type="number" min="0" step="0.1" style="width:62px" value="${cfg.lucroObs}" onchange="setPainelCfg()">x
+            🔵 Bom a partir de <input class="t" id="pPedBom" type="number" min="1" step="1" style="width:62px" value="${cfg.pedBom}" onchange="setPainelCfg()"> pedidos
+            · 🟢 Excelente acima de <input class="t" id="pPedExc" type="number" min="1" step="1" style="width:62px" value="${cfg.pedExc}" onchange="setPainelCfg()">
           </span>
+          <div class="empty-hint" style="margin:4px 0 0">🔴 não vendeu · 🟡 1 a ${Math.max(cfg.pedBom-1,1)} · 🔵 ${cfg.pedBom} a ${cfg.pedExc} · 🟢 ${cfg.pedExc+1} ou mais.<br>Conta a semana atual; enquanto ela ainda não tem dados do robô, vale a última semana fechada. O filtro de período acima <b>não</b> muda a situação.</div>
         </div>
         <div>
           <div class="cfg-dem-lbl">💬 Custo por conversa (R$)</div>
@@ -2751,7 +2757,7 @@ function renderResultadosInner(){
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação</th><th>✏️ Você define</th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
+        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">pedidos da semana</span></th><th>✏️ Você define</th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
         <tbody>${body||'<tr><td colspan="13" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
       </table>
     </div>`;

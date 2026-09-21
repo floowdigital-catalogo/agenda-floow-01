@@ -439,6 +439,9 @@
   .res-man{font-size:11px;cursor:default}
   .opt-wk{text-align:center;font-size:15px;white-space:nowrap}
   th.opt-wk{font-size:9.5px;color:var(--txt-faint)}
+  th.th-sort{cursor:pointer;user-select:none;white-space:nowrap}
+  th.th-sort:hover{color:var(--txt)}
+  th.th-sort.on{color:var(--brand)}
   td.opt-wk-click{cursor:pointer;user-select:none;border-radius:6px;transition:background .12s}
   td.opt-wk-click:hover{background:var(--surface-2)}
   .wk-man{font-size:8px;vertical-align:super;opacity:.75;font-style:normal;margin-left:1px}
@@ -1118,6 +1121,15 @@ function findOrCreateClient(raw){
   if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'iniciante',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()};state.clients.push(c);}
   return c.id;
 }
+/* busca de cliente: acha por nome, #código, segmento ou @instagram */
+function matchCliente(c,q){
+  const s=String(q||'').trim().toLowerCase().replace(/^[#@]/,'');
+  if(!s)return true;
+  return (c.name||'').toLowerCase().includes(s)
+    ||String(c.code||'').includes(s)
+    ||(c.segment||'').toLowerCase().includes(s)
+    ||(c.instagram||'').toLowerCase().includes(s);
+}
 /* ordem padrão dos clientes: pelo código, do menor para o maior (sem código vai pro fim, por nome) */
 function byCode(a,b){
   const ca=parseInt(a.code),cb=parseInt(b.code);
@@ -1513,6 +1525,16 @@ function setOptDate(cid,v){const c=clientById(cid);if(!c)return;c.optDate=v||'';
 function setOptDaily(cid,v){const c=clientById(cid);if(!c)return;c.dailyValue=Number(v)||0;touch(c);saveData();}
 let optDia=iso(new Date()); // dia mostrado na coluna "💬 Conversas" das Otimizações
 function setOptDia(v){optDia=v||iso(new Date());renderOptInner();}
+let optSearch='';
+function setOptSearch(v){optSearch=v;renderOptInner();focoBusca('#optSearch');}
+let optSort=null, optDir=-1;
+function setOptSort(k){
+  if(optSort===k){if(optDir===-1)optDir=1;else{optSort=null;optDir=-1;}}
+  else{optSort=k;optDir=-1;}
+  renderOptInner();
+}
+/* devolve o cursor pro campo depois de redesenhar a tabela */
+function focoBusca(sel){const i=$(sel);if(i){i.focus();try{i.setSelectionRange(i.value.length,i.value.length);}catch(e){}}}
 function setOptNotes(cid,v){const c=clientById(cid);if(!c)return;c.optNotes=v;touch(c);saveData();}
 function setOptStatus(cid,v){const c=clientById(cid);if(!c)return;c.status=v;touch(c);saveData();renderOptInner();}
 function clientComercialUrl(c){const raw=c.code?painelMap()[String(c.code)]:null;return (raw&&raw.comercialUrl)||'';}
@@ -1567,7 +1589,19 @@ function renderOptInner(){
   for(let k=3;k>=0;k--){const mon=startOfWeek(hoje);mon.setDate(mon.getDate()-7*k);const fri=new Date(mon);fri.setDate(mon.getDate()+4);const sun=new Date(mon);sun.setDate(mon.getDate()+6);
     weeks.push({from:iso(mon),to:iso(sun),label:`${pad(mon.getDate())}/${pad(mon.getMonth()+1)}–${pad(fri.getDate())}/${pad(fri.getMonth()+1)}`});}
   const optCfg=resultCfg(); // faixas de custo por conversa (as mesmas da aba Resultados)
-  const rows=cs.map(c=>{
+  const csShow=cs.filter(c=>matchCliente(c,optSearch)); // 🔍 busca (as métricas de cima seguem com todos)
+  if(optSort){ // ordenação pedida no cabeçalho (sem dado vai pro fim)
+    const val=c=>{const ld=liveDia(c.code,optDia),n=ld?(Number(ld.conv)||0):0;
+      switch(optSort){
+        case 'conv':return ld?n:-1;
+        case 'custo':return (ld&&n>0)?(Number(ld.inv)||0)/n:-1;
+        case 'saldo':{const t=contaDoCliente(c.code);return (t&&t.saldo!=null)?Number(t.saldo):-1;}
+        case 'otim':return c.optDate?Number(String(c.optDate).replace(/-/g,'')):-1;
+        default:return 0;
+      }};
+    csShow.sort((a,b)=>(val(a)-val(b))*optDir||byCode(a,b));
+  }
+  const rows=csShow.map(c=>{
     const al=optAlertLevel(c);const nx=nextOptDate(c);
     const prox=al==='red'?`<span class="opt-venc">${nx?fmtD(nx):'—'} ⚠</span>`:`${nx?fmtD(nx):'—'}`;
     const wcells=weeks.map(w=>{
@@ -1615,6 +1649,8 @@ function renderOptInner(){
       <div class="metric"><div class="mv">${proximas}</div><div class="ml">🟡 Próximas (1-2 dias)</div></div>
     </div>
     <div class="cfg-row" style="gap:8px;align-items:center;margin:-4px 0 12px;flex-wrap:wrap">
+      <input class="search" id="optSearch" style="max-width:260px" placeholder="🔍 Buscar cliente…" value="${esc(optSearch)}" oninput="setOptSearch(this.value)">
+      ${optSearch?`<span class="empty-hint" style="margin:0">${csShow.length} de ${cs.length}</span>`:''}
       <span class="cfg-dem-lbl" style="margin:0">💬 Conversas do dia:</span>
       <input class="t" type="date" style="width:160px" value="${optDia}" ${liveWeek()?`min="${liveWeek().from}"`:''} max="${iso(new Date())}" onchange="setOptDia(this.value)">
       <button class="btn ${optDia===iso(new Date())?'primary':'ghost'}" onclick="setOptDia('${iso(new Date())}')">Hoje</button>
@@ -1626,8 +1662,11 @@ function renderOptInner(){
     <div class="empty-hint" style="margin:-4px 0 12px">As 4 semanas mostram a <b>tendência</b> (🟢 Excelente · 🔵 Bom · 🟡 Observação · 🔴 Ruim · ⚪ Sem vendas) — calculada sozinha pelos resultados. <b>Clique na bolinha</b> para definir você mesmo (ela passa por 🟢 🔵 🟡 🔴 ⚪ e volta pro automático); o ✏️ marca as que você definiu. A <b>última coluna (semana atual ★)</b> é a que vale como situação do cliente no Painel e na aba Resultados — e enquanto você não avalia a semana nova, ela fica <b style="color:#f5b400">apagadinha com ↩</b> mostrando a nota da semana passada (1º clique confirma, os próximos mudam). A próxima otimização é 7 dias após a última.</div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>💰 Saldo</th><th>💬 Conversas</th><th>Custo/conv</th><th>Última otim.</th><th>Próxima otim.</th>${weeks.map((w,wi)=>`<th class="opt-wk"${wi===weeks.length-1?' title="Semana atual — é esta que vale como situação do cliente no Painel e em Resultados" style="color:var(--brand)"':''}>${w.label}${wi===weeks.length-1?' ★':''}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="${9+weeks.length}" class="empty-hint">Nenhum cliente.</td></tr>`}</tbody>
+        <thead><tr><th>Cliente</th>${(function(){
+          const th=(k,lbl)=>`<th class="th-sort${optSort===k?' on':''}" onclick="setOptSort('${k}')" title="Clique para ordenar (de novo inverte, na 3ª volta ao normal)">${lbl}${optSort===k?(optDir===-1?' ▼':' ▲'):''}</th>`;
+          return th('saldo','💰 Saldo')+th('conv','💬 Conversas')+th('custo','Custo/conv')+th('otim','Última otim.');
+        })()}<th>Próxima otim.</th>${weeks.map((w,wi)=>`<th class="opt-wk"${wi===weeks.length-1?' title="Semana atual — é esta que vale como situação do cliente no Painel e em Resultados" style="color:var(--brand)"':''}>${w.label}${wi===weeks.length-1?' ★':''}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="${9+weeks.length}" class="empty-hint">${optSearch?'Nenhum cliente encontrado para "'+esc(optSearch)+'".':'Nenhum cliente.'}</td></tr>`}</tbody>
       </table>
     </div>`;
 }
@@ -2602,6 +2641,15 @@ const resultMeta=id=>RESULT_STATUS.find(s=>s.id===id)||RESULT_STATUS[3];
 let painelCache=null, painelLoaded=false, painelLoading=false;
 let painelPeriod='total', painelFrom='', painelTo=''; // filtro: total | mes | semana | custom
 let painelCfgAberto=false; // os ajustes de faixa ficam escondidos (cabeçalho limpo)
+let resSearch='';
+function setResSearch(v){resSearch=v;renderResultadosInner();focoBusca('#resSearch');}
+/* ordenar clicando no cabeçalho: 1º clique maior→menor, 2º menor→maior, 3º volta pra ordem por código */
+let resSort=null, resDir=-1;
+function setResSort(k){
+  if(resSort===k){if(resDir===-1)resDir=1;else{resSort=null;resDir=-1;}}
+  else{resSort=k;resDir=-1;}
+  renderResultadosInner();
+}
 async function loadPainel(){
   if(painelLoading)return; painelLoading=true;
   try{const r=await window.storage.get('floow-painel',true);painelCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
@@ -2895,11 +2943,28 @@ function renderResultadosInner(){
   const cnt={};RESULT_STATUS.forEach(s=>cnt[s.id]=0);rows.forEach(r=>cnt[r.st]++);
   const chips=RESULT_STATUS.map(s=>`<span class="it"><span class="dot" style="background:${s.color}"></span>${s.em} ${s.label} <b>${cnt[s.id]}</b></span>`).join('');
   rows.sort((a,b)=>byCode(a.c,b.c)); // ordem numérica pelo código, do menor para o maior
+  if(resSort){ // ordenação pedida no cabeçalho (sem dado vai pro fim)
+    const val=r=>{const m=r.m,cv=m?Number(m.conversas)||0:0,iv=m?Number(m.investido)||0:0,ft=m?Number(m.faturamento)||0:0,vd=m?Number(m.vendas)||0:0;
+      switch(resSort){
+        case 'conv':return m?cv:-1;
+        case 'custo':return (m&&cv>0)?iv/cv:-1;
+        case 'vendas':return m?vd:-1;
+        case 'taxa':return (m&&cv>0)?vd/cv:-1;
+        case 'fat':return m?ft:-1;
+        case 'inv':return m?iv:-1;
+        case 'roas':return (m&&iv>0)?ft/iv:-1;
+        case 'situacao':return resultMeta(r.st).ord;
+        case 'ped':return r.ped==null?-1:r.ped;
+        default:return 0;
+      }};
+    rows.sort((a,b)=>(val(a)-val(b))*resDir||byCode(a.c,b.c));
+  }
+  const shown=rows.filter(r=>matchCliente(r.c,resSearch)); // 🔍 busca (os chips de cima contam todos)
   // SITUAÇÃO: quem manda é você. "Automático" mostra entre parênteses o que os pedidos dizem.
   const situSel=c=>{const cur=situacaoEscolhida(c);const am=resultMeta(situacaoAuto(c));
     const o=[['auto',`🤖 Automático (${am.em} ${am.label})`],['excelente','🟢 Excelente'],['bom','🔵 Bom'],['observacao','🟡 Observação'],['ruim','🔴 Ruim'],['semvendas','⚪ Sem vendas']];
     return `<select class="filter" style="width:100%;min-width:170px" onchange="setResultStatus('${c.id}',this.value)">${o.map(x=>`<option value="${x[0]}" ${x[0]===cur?'selected':''}>${x[1]}</option>`).join('')}</select>`;};
-  const body=rows.map(r=>{const m=r.m;const sm=resultMeta(r.st);
+  const body=shown.map(r=>{const m=r.m;const sm=resultMeta(r.st);
     const inv=m?fmtBRL(m.investido):'—',conv=m?(Number(m.conversas)||0):'—',vend=m?(Number(m.vendas)||0):'—',fat=m?fmtBRL(m.faturamento):'—';
     const roas=(m&&Number(m.investido)>0)?((Number(m.faturamento)||0)/Number(m.investido)).toFixed(1)+'x':'—';
     const taxa=(m&&Number(m.conversas)>0)?((Number(m.vendas)||0)/Number(m.conversas)*100).toFixed(1)+'%':'—';
@@ -2922,6 +2987,8 @@ function renderResultadosInner(){
   wrap.innerHTML=`
     <div class="panel">
       <div class="cfg-row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <input class="search" id="resSearch" style="max-width:260px" placeholder="🔍 Buscar cliente…" value="${esc(resSearch)}" oninput="setResSearch(this.value)">
+        ${resSearch?`<span class="empty-hint" style="margin:0">${shown.length} de ${rows.length}</span>`:''}
         <span class="cfg-dem-lbl" style="margin:0">📅 Período:</span>
         <div class="seg">
           <button class="${painelPeriod==='total'?'on':''}" onclick="setPainelPeriod('total')">Total</button>
@@ -2965,8 +3032,12 @@ function renderResultadosInner(){
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">você escolhe</span></th><th>✏️ Pedidos<br><span style="font-weight:400;text-transform:none;opacity:.7">da semana</span></th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
-        <tbody>${body||'<tr><td colspan="12" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
+        <thead><tr><th>Cliente</th>${(function(){
+          const th=(k,lbl,sub)=>`<th class="th-sort${resSort===k?' on':''}" onclick="setResSort('${k}')" title="Clique para ordenar (de novo inverte, na 3ª volta ao normal)">${lbl}${resSort===k?(resDir===-1?' ▼':' ▲'):''}${sub?`<br><span style="font-weight:400;text-transform:none;opacity:.7">${sub}</span>`:''}</th>`;
+          return th('conv','Conversas')+th('custo','Custo/conv')+th('vendas','Vendas')+th('taxa','Conversão')+th('fat','Faturamento')+th('inv','Investido')+th('roas','ROAS')
+            +th('situacao','Situação','você escolhe')+th('ped','✏️ Pedidos','da semana');
+        })()}<th>📋 Relatório</th><th>Obs.</th></tr></thead>
+        <tbody>${body||`<tr><td colspan="12" class="empty-hint">${resSearch?'Nenhum cliente encontrado para "'+esc(resSearch)+'".':'Nenhum cliente.'}</td></tr>`}</tbody>
       </table>
     </div>`;
 }

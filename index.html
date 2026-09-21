@@ -439,6 +439,9 @@
   .res-man{font-size:11px;cursor:default}
   .opt-wk{text-align:center;font-size:15px;white-space:nowrap}
   th.opt-wk{font-size:9.5px;color:var(--txt-faint)}
+  td.opt-wk-click{cursor:pointer;user-select:none;border-radius:6px;transition:background .12s}
+  td.opt-wk-click:hover{background:var(--surface-2)}
+  .wk-man{font-size:8px;vertical-align:super;opacity:.75;font-style:normal;margin-left:1px}
   .opt-venc{color:var(--danger);font-weight:600;white-space:nowrap}
   .opt-link{padding:4px 9px!important;font-size:12px!important;white-space:nowrap}
   /* alerta de saldo baixo */
@@ -1512,6 +1515,18 @@ function setOptDia(v){optDia=v||iso(new Date());renderOptInner();}
 function setOptNotes(cid,v){const c=clientById(cid);if(!c)return;c.optNotes=v;touch(c);saveData();}
 function setOptStatus(cid,v){const c=clientById(cid);if(!c)return;c.status=v;touch(c);saveData();renderOptInner();}
 function clientComercialUrl(c){const raw=c.code?painelMap()[String(c.code)]:null;return (raw&&raw.comercialUrl)||'';}
+/* 🖊️ situação de UMA semana definida na mão (clicando na bolinha) — vence o automático */
+const SEM_CICLO=['auto','excelente','bom','observacao','ruim','semvendas'];
+function semanaManual(c,fromISO){const m=c&&c.semanaStatus;const v=m?m[fromISO]:null;return (v&&v!=='auto')?v:null;}
+function cycleSemana(cid,fromISO){
+  const c=clientById(cid);if(!c)return;
+  if(!c.semanaStatus)c.semanaStatus={};
+  const cur=c.semanaStatus[fromISO]||'auto';
+  const i=SEM_CICLO.indexOf(cur);
+  const nxt=SEM_CICLO[(i<0?1:i+1)%SEM_CICLO.length];
+  if(nxt==='auto')delete c.semanaStatus[fromISO]; else c.semanaStatus[fromISO]=nxt;
+  touch(c);saveData();renderOptInner();
+}
 function clientSituacaoRange(c,fromISO,toISO){ // situação automática do cliente numa semana específica
   const raw=c.code?painelMap()[String(c.code)]:null;if(!raw)return 'sem';
   const ok=d=>d&&d>=fromISO&&d<=toISO;let inv=0,conv=0,vendas=0,fat=0;
@@ -1534,7 +1549,11 @@ function renderOptInner(){
   const rows=cs.map(c=>{
     const al=optAlertLevel(c);const nx=nextOptDate(c);
     const prox=al==='red'?`<span class="opt-venc">${nx?fmtD(nx):'—'} ⚠</span>`:`${nx?fmtD(nx):'—'}`;
-    const wcells=weeks.map(w=>{const m=resultMeta(clientSituacaoRange(c,w.from,w.to));return `<td class="opt-wk" title="${w.label}: ${m.label}">${m.em}</td>`;}).join('');
+    const wcells=weeks.map(w=>{
+      const man=semanaManual(c,w.from);
+      const m=resultMeta(man||clientSituacaoRange(c,w.from,w.to));
+      return `<td class="opt-wk opt-wk-click" onclick="cycleSemana('${c.id}','${w.from}')" title="${w.label}: ${m.label} ${man?'(você definiu)':'(automático)'} — clique para mudar">${m.em}${man?'<i class="wk-man">✏️</i>':''}</td>`;
+    }).join('');
     const url=clientComercialUrl(c);
     const link=url?`<a class="btn ghost opt-link" href="${esc(url)}" target="_blank" rel="noopener">Comercial ↗</a>`:'<span style="color:var(--txt-faint)">—</span>';
     const stSel=`<select class="filter" onchange="setOptStatus('${c.id}',this.value)">${[['ativo','🟢 Ativo'],['pausado','⏸ Pausado']].map(o=>`<option value="${o[0]}" ${c.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>`;
@@ -1578,7 +1597,7 @@ function renderOptInner(){
       <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
       <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar no Meta agora (leva ~3 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
     </div>
-    <div class="empty-hint" style="margin:-4px 0 12px">As 4 semanas mostram a <b>tendência</b> (🟢 Excelente · 🔵 Bom · 🟡 Observação · 🔴 Ruim) — calculada sozinha pelos resultados. A próxima otimização é 7 dias após a última.</div>
+    <div class="empty-hint" style="margin:-4px 0 12px">As 4 semanas mostram a <b>tendência</b> (🟢 Excelente · 🔵 Bom · 🟡 Observação · 🔴 Ruim · ⚪ Sem vendas) — calculada sozinha pelos resultados. <b>Clique na bolinha</b> para definir você mesmo (ela passa por 🟢 🔵 🟡 🔴 ⚪ e volta pro automático); o ✏️ marca as que você definiu. A próxima otimização é 7 dias após a última.</div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
         <thead><tr><th>Cliente</th><th>💰 Saldo</th><th>💬 Conversas</th><th>Custo/conv</th><th>Última otim.</th><th>Próxima otim.</th>${weeks.map(w=>`<th class="opt-wk">${w.label}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>

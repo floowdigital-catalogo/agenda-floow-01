@@ -1109,6 +1109,13 @@ function findOrCreateClient(raw){
   if(!c){c={id:uid(),code:p.code||'',name:p.name,status:'ativo',health:'iniciante',owner:pmId(),checklist:newChecklist(),updatedAt:Date.now()};state.clients.push(c);}
   return c.id;
 }
+/* ordem padrão dos clientes: pelo código, do menor para o maior (sem código vai pro fim, por nome) */
+function byCode(a,b){
+  const ca=parseInt(a.code),cb=parseInt(b.code);
+  if(!isNaN(ca)&&!isNaN(cb))return ca-cb;
+  if(!isNaN(ca))return -1; if(!isNaN(cb))return 1;
+  return (a.name||'').localeCompare(b.name||'','pt');
+}
 function clientPending(id){return state.events.filter(e=>e.clientId===id&&!e.done).length;}
 function clientNext(id){
   const todayIso=iso(new Date());
@@ -1508,7 +1515,7 @@ function clientSituacaoRange(c,fromISO,toISO){ // situação automática do clie
 function renderOpt(app){app.insertAdjacentHTML('beforeend','<div id="optWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();renderOptInner();}
 function renderOptInner(){
   const wrap=$('#optWrap');if(!wrap)return;
-  const cs=state.clients.slice().filter(c=>c.status!=='arquivado').sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
+  const cs=state.clients.slice().filter(c=>c.status!=='arquivado').sort(byCode);
   const ativos=state.clients.filter(c=>c.status==='ativo').length;
   const vencidas=cs.filter(c=>optAlertLevel(c)==='red').length, proximas=cs.filter(c=>optAlertLevel(c)==='yellow').length;
   const fmtD=d=>`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
@@ -2076,7 +2083,7 @@ function renderClientGrid(){
   else if(clientStatusFilter!=='all')list=list.filter(c=>c.status===clientStatusFilter);
   if(clientHealthFilter!=='all')list=list.filter(c=>clientSituacao(c)===clientHealthFilter);
   if(clientSearch.trim()){const q=clientSearch.trim().toLowerCase().replace(/^@/,'');list=list.filter(c=>c.name.toLowerCase().includes(q)||(c.code||'').includes(q)||(c.instagram||'').toLowerCase().includes(q)||(c.segment||'').toLowerCase().includes(q));}
-  list.sort((a,b)=>{const ca=parseInt(a.code),cb=parseInt(b.code);if(!isNaN(ca)&&!isNaN(cb))return ca-cb;return a.name.localeCompare(b.name,'pt');});
+  list.sort(byCode);
   const head=(clientStatusFilter==='arquivado')?churnResumoHTML():'';
   if(!list.length){wrap.innerHTML=head+`<div class="empty-state">Nenhum cliente encontrado.</div>`;return;}
   const grid=document.createElement('div');grid.className='cgrid';
@@ -2320,6 +2327,13 @@ function renderConfig(app){
     <div class="cfg-card" id="gcalCfg"></div>
     <div class="cfg-card" id="driveCfg"></div>`:''}
 
+    <div class="cfg-sec-h">🤖 Atualizar robô <span class="cfg-side">liga o botão "Atualizar robô" da aba 📊 Resultados</span></div>
+    <div class="cfg-card">
+      <div class="cfg-dem-lbl">Link do robô (Aplicativo da Web do Apps Script)</div>
+      <input class="t" id="cfgRobotUrl" value="${esc(state.robotUrl||'')}" placeholder="https://script.google.com/macros/s/..../exec" onchange="setRobotUrl(this.value)">
+      <div class="empty-hint" style="margin:6px 0 0">Publique o Apps Script em <b>Implantar → Nova implantação → Aplicativo da Web</b> (executar como <b>você</b>, acesso <b>qualquer pessoa</b>) e cole aqui o link que terminar em <b>/exec</b>. Sem isso, o botão só relê o que o robô já gravou.</div>
+    </div>
+
     <div class="cfg-sec-h">🗂️ Demandas <span class="cfg-side">o que aparece ao criar uma entrega · vincule a uma entrega para marcar automático</span></div>
     <div id="typesList"></div>
     <button class="btn ghost cfg-add" onclick="addType()">+ Adicionar demanda</button>
@@ -2423,11 +2437,10 @@ function openCopy(presetId){
 function setCopyMode(m){copyMode=m;const a=$('#copyModeAg'),r=$('#copyModeRep');if(a)a.classList.toggle('on',m==='agenda');if(r)r.classList.toggle('on',m==='report');renderCopy();}
 function closeCopy(){$('#copyScrim').classList.remove('on');}
 /* soma investido/conversas/vendas de um cliente num intervalo (pro relatório) */
-function aggClientRange(code,fromISO,toISO){const raw=code?painelMap()[String(code)]:null;if(!raw)return null;
-  const ok=d=>d&&d>=fromISO&&d<=toISO;let inv=0,conv=0,vendas=0,fat=0;
-  (Array.isArray(raw.semanas)?raw.semanas:[]).forEach(w=>{if(ok(w.d)){inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;}});
-  (Array.isArray(raw.vendas)?raw.vendas:[]).forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
-  return {investido:inv,conversas:conv,vendas:vendas,faturamento:fat};}
+function aggClientRange(code,fromISO,toISO){
+  const raw=code?painelMap()[String(code)]:null;
+  if(!raw&&!liveDoCliente(code))return null;
+  return _agg_(raw,code,fromISO,toISO);}
 function buildWeekReport(cid){
   if(!cid)return 'Escolha um cliente.';
   const s=startOfWeek(new Date()),e=new Date(s);e.setDate(s.getDate()+6);
@@ -2523,6 +2536,49 @@ async function loadPainel(){
   if(currentUser)render(); // re-renderiza pra Painel/Otimizações/Resultados já mostrarem a situação
 }
 function painelMap(){const m={};((painelCache&&painelCache.clientes)||[]).forEach(c=>{if(c.code)m[String(c.code)]=c;});return m;}
+/* ---------- ⚡ AO VIVO: investido + conversas direto do Meta (robô de hora em hora, chave 'floow-agora') ---------- */
+let liveCache=null, liveLoaded=false, liveLoading=false;
+async function loadLive(){
+  if(liveLoading)return; liveLoading=true;
+  try{const r=await window.storage.get('floow-agora',true);liveCache=(r&&r.value)?JSON.parse(r.value):null;}
+  catch(e){liveCache=null;}
+  liveLoaded=true;liveLoading=false;
+  if(currentUser)render();
+}
+function liveWeek(){const s=liveCache&&liveCache.semana;return (s&&s.from&&s.to)?s:null;}
+function liveDoCliente(code){
+  if(!liveCache||!Array.isArray(liveCache.contas)||!code)return null;
+  return liveCache.contas.find(c=>String(c.code)===String(code))||null;
+}
+function liveQuando(){return (liveCache&&liveCache.updatedAt)?new Date(liveCache.updatedAt):null;}
+function liveIdadeMin(){const q=liveQuando();return q?Math.max(0,Math.round((Date.now()-q.getTime())/60000)):null;}
+/* ⚡ rodar o robô NA HORA (Aplicativo da Web do Apps Script) — além do automático de 1 em 1 hora */
+const ROBO_CHAVE='floow-agora-2026'; // senha simples, tem que ser igual à do Apps Script
+function setRobotUrl(v){state.robotUrl=(v||'').trim();saveData();toast(state.robotUrl?'Link do robô salvo ✓':'Link do robô apagado');}
+let roboRodando=false;
+async function rodarRoboAgora(){
+  if(roboRodando)return;
+  const base=(state.robotUrl||'').trim();
+  if(!base){toast('Cole o link do robô em ⚙️ Config → 🤖 Atualizar robô');return;}
+  roboRodando=true;renderResultadosInner();
+  const antes=Number((liveCache&&liveCache.updatedAt)||0);
+  const url=base+(base.indexOf('?')>=0?'&':'?')+'acao=agora&k='+encodeURIComponent(ROBO_CHAVE);
+  try{await fetch(url,{method:'GET',mode:'no-cors',cache:'no-store'});}catch(e){}
+  // o robô roda no Google; a gente fica olhando até chegar dado novo (leva ~1 a 2 min)
+  const limite=Date.now()+240000; let ok=false;
+  while(Date.now()<limite){
+    await new Promise(r=>setTimeout(r,5000));
+    try{
+      const r=await window.storage.get('floow-agora',true);
+      const v=(r&&r.value)?JSON.parse(r.value):null;
+      if(v&&Number(v.updatedAt)>antes){liveCache=v;liveLoaded=true;ok=true;break;}
+    }catch(e){}
+  }
+  roboRodando=false;
+  if(ok){saldosLoaded=false;loadSaldos();toast('✅ Robô rodou — números atualizados agora mesmo');}
+  else toast('⏳ O robô está demorando. Os números chegam sozinhos — clique em 🔄 Atualizar daqui a pouco.');
+  renderResultadosInner();
+}
 /* ---------- 📊 relatório semanal do cliente (robô manda pronto em 'floow-relatorios') ---------- */
 let relCache=null, relLoaded=false, relLoading=false;
 async function loadRelatorios(){
@@ -2617,16 +2673,27 @@ function painelRange(){
   if(painelPeriod==='custom'&&painelFrom&&painelTo)return {from:painelFrom,to:painelTo};
   return null; // total
 }
-function aggClient(raw){ // soma investido/conversas (semanas) e vendas/faturamento (vendas) no período
-  const r=painelRange(), ok=d=>!r||(d&&d>=r.from&&d<=r.to);
+/* soma investido/conversas (semanas) + vendas/faturamento (vendas) num período.
+   Quando existe dado AO VIVO da semana corrente, ele SUBSTITUI o que o robô semanal gravou nessa semana
+   (senão contaria duas vezes). from/to nulos = período total. */
+function _agg_(raw,code,from,to){
+  const ok=d=>(!from&&!to)||(d&&(!from||d>=from)&&(!to||d<=to));
+  const lw=liveWeek(), lv=lw?liveDoCliente(code):null;
+  const usaLive=!!lv&&((!from&&!to)||((!to||lw.from<=to)&&(!from||lw.to>=from))); // semana ao vivo cruza o período?
   let inv=0,conv=0,vendas=0,fat=0;
   const sem=(raw&&Array.isArray(raw.semanas))?raw.semanas:[];
   const vds=(raw&&Array.isArray(raw.vendas))?raw.vendas:[];
-  sem.forEach(w=>{if(ok(w.d)){inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;}});
+  sem.forEach(w=>{
+    if(!ok(w.d))return;
+    if(usaLive&&w.d>=lw.from&&w.d<=lw.to)return; // essa semana vem do ao vivo
+    inv+=Number(w.inv)||0;conv+=Number(w.conv)||0;
+  });
   vds.forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
+  if(usaLive){inv+=Number(lv.inv)||0;conv+=Number(lv.conv)||0;}
   return {investido:inv,conversas:conv,vendas:vendas,faturamento:fat};
 }
-function metricsFor(code){const raw=code?painelMap()[String(code)]:null;return raw?aggClient(raw):null;}
+function aggClient(raw){const r=painelRange();return _agg_(raw,raw&&raw.code,r?r.from:null,r?r.to:null);}
+function metricsFor(code){const raw=code?painelMap()[String(code)]:null;if(!raw&&!liveDoCliente(code))return null;return _agg_(raw,code,(painelRange()||{}).from||null,(painelRange()||{}).to||null);}
 function setPainelPeriod(p){painelPeriod=p;renderResultadosInner();}
 function setPainelCustom(){painelFrom=$('#pFrom').value;painelTo=$('#pTo').value;if(painelFrom&&painelTo)renderResultadosInner();}
 function painelPeriodLabel(){const r=painelRange();if(!r)return 'mostrando o total acumulado';return `mostrando ${r.from.split('-').reverse().join('/')} até ${r.to.split('-').reverse().join('/')}`;}
@@ -2638,14 +2705,39 @@ function resultCfg(){return {
   margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem% (só a coluna Lucro)
 };}
 /* Situação pela QUANTIDADE DE PEDIDOS: 0 → 🔴 ruim · 1 a 3 → 🟡 observação · 4 a 7 → 🔵 bom · 8+ → 🟢 excelente */
+function situacaoPorPedidos(n,cfg){
+  n=Number(n)||0;
+  if(n<=0)return 'ruim';                            // não vendeu
+  if(n<cfg.pedBom)return 'observacao';              // abaixo do mínimo (padrão: 1 a 3)
+  if(n<=cfg.pedExc)return 'bom';                    // padrão: 4 a 7
+  return 'excelente';                               // padrão: 8 ou mais
+}
 function resultAuto(m,cfg){
   if(!m)return 'sem';
   const inv=Number(m.investido)||0,fat=Number(m.faturamento)||0,conv=Number(m.conversas)||0,ped=Number(m.vendas)||0;
   if(ped<=0&&inv<=0&&fat<=0&&conv<=0)return 'sem'; // nem rodou nem lançou nada = sem dados
-  if(ped<=0)return 'ruim';                          // não vendeu
-  if(ped<cfg.pedBom)return 'observacao';            // abaixo do mínimo (padrão: 1 a 3)
-  if(ped<=cfg.pedExc)return 'bom';                  // padrão: 4 a 7
-  return 'excelente';                               // padrão: 8 ou mais
+  return situacaoPorPedidos(ped,cfg);
+}
+/* 🖊️ pedidos informados NA MÃO pelo Eduardo (por semana) — vencem o número do robô */
+function weekKeyNow(){return iso(startOfWeek(new Date()));}
+function pedidosManual(c){
+  const p=c&&c.pedidosManual;if(!p)return null;
+  const v=p[weekKeyNow()];
+  return (v===''||v==null)?null:(Number(v)||0);
+}
+function setPedidosManual(cid,v){
+  const c=clientById(cid);if(!c)return;
+  if(!c.pedidosManual)c.pedidosManual={};
+  const k=weekKeyNow();
+  if(v===''||v==null)delete c.pedidosManual[k]; else c.pedidosManual[k]=Number(v)||0;
+  touch(c);saveData();renderResultadosInner();
+}
+/* a situação automática do cliente: usa os pedidos que VOCÊ informou; se não informou, os do robô */
+function situacaoAuto(c){
+  const cfg=resultCfg();
+  const pm=pedidosManual(c);
+  if(pm!=null)return situacaoPorPedidos(pm,cfg);
+  return resultAuto(metricsSemana(c.code),cfg);
 }
 /* A saúde é SEMPRE de uma semana (domingo → sábado). Como o robô só grava o painel na sexta,
    vale a semana atual quando ela já tem dados; senão, a última semana que tem. */
@@ -2673,7 +2765,8 @@ function custoNivel(custo,cfg){
   return {label:'médio',color:'#f5b400'};
 }
 function resultFinal(c,m,cfg){return (c.resultStatus&&c.resultStatus!=='auto')?c.resultStatus:resultAuto(m,cfg);}
-function clientSituacao(c){if(!c)return 'sem';return resultFinal(c,metricsSemana(c.code),resultCfg());} // saúde do cliente = pedidos DESTA SEMANA (não muda com o filtro de período)
+// saúde do cliente = o que VOCÊ escolheu na aba Resultados; em "Automático", os pedidos da semana
+function clientSituacao(c){if(!c)return 'sem';return (c.resultStatus&&c.resultStatus!=='auto')?c.resultStatus:situacaoAuto(c);}
 function setResultStatus(cid,val){const c=clientById(cid);if(!c)return;c.resultStatus=val;touch(c);saveData();renderResultadosInner();}
 function setResultNote(cid,val){const c=clientById(cid);if(!c)return;c.resultNote=val;touch(c);saveData();}
 function setPainelCfg(){
@@ -2684,20 +2777,24 @@ function setPainelCfg(){
   state.painelMargem=Number($('#pMargem').value)||20;
   saveData();renderResultadosInner();
 }
-function refreshPainel(){painelLoaded=false;loadPainel();renderResultadosInner();}
-function renderResultados(app){app.insertAdjacentHTML('beforeend','<div id="resWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();if(!relLoaded&&!relLoading)loadRelatorios();renderResultadosInner();}
+function refreshPainel(){painelLoaded=false;liveLoaded=false;saldosLoaded=false;loadPainel();loadLive();loadSaldos();renderResultadosInner();toast('🔄 Buscando os números mais recentes…');}
+function renderResultados(app){app.insertAdjacentHTML('beforeend','<div id="resWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();if(!liveLoaded&&!liveLoading)loadLive();if(!relLoaded&&!relLoading)loadRelatorios();renderResultadosInner();}
 function renderResultadosInner(){
   const wrap=$('#resWrap');if(!wrap)return;
   const cfg=resultCfg();
   if(!painelLoaded){wrap.innerHTML='<div class="panel"><div class="empty-hint" style="padding:18px">Carregando resultados…</div></div>';return;}
   const when=(painelCache&&painelCache.updatedAt)?new Date(painelCache.updatedAt):null;
-  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{const m=metricsFor(c.code);const sr=semanaDeResultado(c.code);
-    return {c,m,sr,ped:sr.m?(Number(sr.m.vendas)||0):null,st:resultFinal(c,sr.m,cfg),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
+  const rows=state.clients.filter(c=>c.status!=='arquivado').map(c=>{
+    const m=metricsFor(c.code);const sr=semanaDeResultado(c.code);const pm=pedidosManual(c);
+    const pedRobo=sr.m?(Number(sr.m.vendas)||0):null;
+    return {c,m,sr,pm,pedRobo,ped:(pm!=null?pm:pedRobo),st:clientSituacao(c),manual:!!(c.resultStatus&&c.resultStatus!=='auto')};});
   const cnt={};RESULT_STATUS.forEach(s=>cnt[s.id]=0);rows.forEach(r=>cnt[r.st]++);
   const chips=RESULT_STATUS.map(s=>`<span class="it"><span class="dot" style="background:${s.color}"></span>${s.em} ${s.label} <b>${cnt[s.id]}</b></span>`).join('');
-  rows.sort((a,b)=>resultMeta(a.st).ord-resultMeta(b.st).ord||(a.c.name||'').localeCompare(b.c.name||'','pt'));
-  const optSel=c=>{const cur=c.resultStatus||'auto';const o=[['auto','🤖 Automático'],['excelente','🟢 Excelente'],['bom','🔵 Bom'],['observacao','🟡 Observação'],['ruim','🔴 Ruim'],['semvendas','⚪ Sem vendas']];
-    return `<select class="filter" onchange="setResultStatus('${c.id}',this.value)">${o.map(x=>`<option value="${x[0]}" ${x[0]===cur?'selected':''}>${x[1]}</option>`).join('')}</select>`;};
+  rows.sort((a,b)=>byCode(a.c,b.c)); // ordem numérica pelo código, do menor para o maior
+  // SITUAÇÃO: quem manda é você. "Automático" mostra entre parênteses o que os pedidos dizem.
+  const situSel=c=>{const cur=c.resultStatus||'auto';const am=resultMeta(situacaoAuto(c));
+    const o=[['auto',`🤖 Automático (${am.em} ${am.label})`],['excelente','🟢 Excelente'],['bom','🔵 Bom'],['observacao','🟡 Observação'],['ruim','🔴 Ruim'],['semvendas','⚪ Sem vendas']];
+    return `<select class="filter" style="width:100%;min-width:170px" onchange="setResultStatus('${c.id}',this.value)">${o.map(x=>`<option value="${x[0]}" ${x[0]===cur?'selected':''}>${x[1]}</option>`).join('')}</select>`;};
   const body=rows.map(r=>{const m=r.m;const sm=resultMeta(r.st);
     const inv=m?fmtBRL(m.investido):'—',conv=m?(Number(m.conversas)||0):'—',vend=m?(Number(m.vendas)||0):'—',fat=m?fmtBRL(m.faturamento):'—';
     const roas=(m&&Number(m.investido)>0)?((Number(m.faturamento)||0)/Number(m.investido)).toFixed(1)+'x':'—';
@@ -2710,9 +2807,11 @@ function renderResultadosInner(){
     return `<tr>
       <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
       <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
-      <td><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}
-        <div class="empty-hint" style="margin:2px 0 0;font-size:11px">${r.ped==null?'sem dados':r.ped+' pedido'+(r.ped===1?'':'s')+' · '+(r.sr.atual?'esta semana':'sem. '+faixaSemana(r.sr.from,r.sr.to))}</div></td>
-      <td>${optSel(r.c)}</td>
+      <td>${situSel(r.c)}
+        <div style="margin-top:4px"><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</div></td>
+      <td>
+        <input class="t" type="number" min="0" step="1" style="width:78px;text-align:center" value="${r.pm!=null?r.pm:''}" placeholder="${r.pedRobo!=null?r.pedRobo:'—'}" onchange="setPedidosManual('${r.c.id}',this.value)" title="Quantos pedidos esse cliente teve nesta semana">
+        <div class="empty-hint" style="margin:2px 0 0;font-size:11px">${r.pm!=null?'você informou':(r.pedRobo==null?'sem dados do robô':'robô: '+r.pedRobo+' · '+(r.sr.atual?'esta semana':'sem. '+faixaSemana(r.sr.from,r.sr.to)))}</div></td>
       <td>${relatorioDoCliente(r.c.code)?`<button class="btn ghost opt-link" onclick="copiarRelatorio('${esc(r.c.code)}')" title="Copiar relatório da última semana">📋 Copiar</button>`:'<span style="color:var(--txt-faint)">—</span>'}${(r.m&&Number(r.m.faturamento)>0)?` <button class="btn ghost opt-link" onclick="celebrar('${r.c.id}')" title="Gerar mensagem de comemoração">🎉</button>`:''}</td>
       <td><input class="t res-note" value="${esc(r.c.resultNote||'')}" placeholder="anotação…" onchange="setResultNote('${r.c.id}',this.value)"></td>
     </tr>`;}).join('');
@@ -2736,7 +2835,7 @@ function renderResultadosInner(){
             🔵 Bom a partir de <input class="t" id="pPedBom" type="number" min="1" step="1" style="width:62px" value="${cfg.pedBom}" onchange="setPainelCfg()"> pedidos
             · 🟢 Excelente acima de <input class="t" id="pPedExc" type="number" min="1" step="1" style="width:62px" value="${cfg.pedExc}" onchange="setPainelCfg()">
           </span>
-          <div class="empty-hint" style="margin:4px 0 0">🔴 não vendeu · 🟡 1 a ${Math.max(cfg.pedBom-1,1)} · 🔵 ${cfg.pedBom} a ${cfg.pedExc} · 🟢 ${cfg.pedExc+1} ou mais.<br>Conta a semana atual; enquanto ela ainda não tem dados do robô, vale a última semana fechada. O filtro de período acima <b>não</b> muda a situação.</div>
+          <div class="empty-hint" style="margin:4px 0 0">🔴 não vendeu · 🟡 1 a ${Math.max(cfg.pedBom-1,1)} · 🔵 ${cfg.pedBom} a ${cfg.pedExc} · 🟢 ${cfg.pedExc+1} ou mais.<br>Na tabela: a coluna <b>Situação</b> é você que escolhe (em "Automático" ela segue os pedidos) e em <b>✏️ Pedidos</b> você digita quantos pedidos o cliente teve nesta semana — o que você digitar vence o número do robô. O filtro de período acima <b>não</b> muda a situação.</div>
         </div>
         <div>
           <div class="cfg-dem-lbl">💬 Custo por conversa (R$)</div>
@@ -2750,14 +2849,20 @@ function renderResultadosInner(){
           <span style="display:flex;align-items:center;gap:6px"><input class="t" id="pMargem" type="number" min="0" max="100" step="1" style="width:70px" value="${cfg.margem}" onchange="setPainelCfg()"><b>% do faturamento</b></span>
         </div>
         <div class="spacer"></div>
-        <button class="btn ghost" onclick="refreshPainel()">🔄 Atualizar</button>
+        <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
+        <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar os números no Meta neste instante (leva ~1 a 2 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
       </div>
       <div class="hleg" style="margin-top:10px">${chips}</div>
-      ${when?`<div class="empty-hint" style="margin-top:6px">Dados do robô · atualizado em ${pad(when.getDate())}/${pad(when.getMonth()+1)} às ${pad(when.getHours())}:${pad(when.getMinutes())}</div>`:`<div class="empty-hint" style="margin-top:6px">⚠️ Ainda não recebi dados do robô. Rode <b>gerarPainelGeral</b> no Apps Script (e cole a anon key lá).</div>`}
+      ${when?`<div class="empty-hint" style="margin-top:6px">Vendas e faturamento (planilhas) · atualizado em ${pad(when.getDate())}/${pad(when.getMonth()+1)} às ${pad(when.getHours())}:${pad(when.getMinutes())}</div>`:`<div class="empty-hint" style="margin-top:6px">⚠️ Ainda não recebi dados do robô. Rode <b>gerarPainelGeral</b> no Apps Script (e cole a anon key lá).</div>`}
+      ${(function(){const q=liveQuando(),min=liveIdadeMin();
+        if(!q)return '<div class="empty-hint" style="margin:2px 0 0">⚡ Investido e conversas ao vivo: aguardando o robô. Rode <b>atualizarAgora</b> no Apps Script.</div>';
+        const quando=min<2?'agora há pouco':(min<60?`há ${min} min`:`às ${pad(q.getHours())}:${pad(q.getMinutes())}`);
+        const sb=saldosBaixos().length;
+        return `<div class="empty-hint" style="margin:2px 0 0">⚡ Investido, conversas e 💰 saldo direto do Meta · ${quando}${min>90?' <b style="color:var(--danger)">(o robô parece parado)</b>':''}${sb?` · <b style="color:var(--danger)">🔴 ${sb} conta(s) com saldo baixo</b>`:''}</div>`;})()}
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">pedidos da semana</span></th><th>✏️ Você define</th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
+        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">você escolhe</span></th><th>✏️ Pedidos<br><span style="font-weight:400;text-transform:none;opacity:.7">da semana</span></th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
         <tbody>${body||'<tr><td colspan="13" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
       </table>
     </div>`;

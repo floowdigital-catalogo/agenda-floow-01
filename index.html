@@ -1502,6 +1502,8 @@ function recomputeHealth(c){const sold=c.weekSold;if(sold===undefined||sold===nu
 function markSold(cid,sold){const c=clientById(cid);if(!c)return;const cur=iso(startOfWeek(new Date()));if(c.weekKey!==cur){c.prevWeekSold=c.weekSold;c.weekKey=cur;}c.weekSold=sold;recomputeHealth(c);touch(c);saveData();renderOptInner();}
 function setOptDate(cid,v){const c=clientById(cid);if(!c)return;c.optDate=v||'';touch(c);saveData();renderOptInner();}
 function setOptDaily(cid,v){const c=clientById(cid);if(!c)return;c.dailyValue=Number(v)||0;touch(c);saveData();}
+let optDia=iso(new Date()); // dia mostrado na coluna "💬 Conversas" das Otimizações
+function setOptDia(v){optDia=v||iso(new Date());renderOptInner();}
 function setOptNotes(cid,v){const c=clientById(cid);if(!c)return;c.optNotes=v;touch(c);saveData();}
 function setOptStatus(cid,v){const c=clientById(cid);if(!c)return;c.status=v;touch(c);saveData();renderOptInner();}
 function clientComercialUrl(c){const raw=c.code?painelMap()[String(c.code)]:null;return (raw&&raw.comercialUrl)||'';}
@@ -1512,7 +1514,7 @@ function clientSituacaoRange(c,fromISO,toISO){ // situação automática do clie
   (Array.isArray(raw.vendas)?raw.vendas:[]).forEach(s=>{if(ok(s.d)){vendas++;fat+=Number(s.v)||0;}});
   return resultAuto({investido:inv,conversas:conv,vendas:vendas,faturamento:fat},resultCfg());
 }
-function renderOpt(app){app.insertAdjacentHTML('beforeend','<div id="optWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();renderOptInner();}
+function renderOpt(app){app.insertAdjacentHTML('beforeend','<div id="optWrap"></div>');if(!painelLoaded&&!painelLoading)loadPainel();if(!liveLoaded&&!liveLoading)loadLive();renderOptInner();}
 function renderOptInner(){
   const wrap=$('#optWrap');if(!wrap)return;
   const cs=state.clients.slice().filter(c=>c.status!=='arquivado').sort(byCode);
@@ -1537,7 +1539,10 @@ function renderOptInner(){
     return `<tr>
       <td class="res-cli">${c.code?`<span class="ccode">#${esc(c.code)}</span> `:''}${esc(c.name)}</td>
       <td>${sdCell}</td>
-      <td><span style="display:flex;align-items:center;gap:3px"><b>R$</b><input class="t res-note" style="width:72px" type="number" min="0" step="1" value="${c.dailyValue||''}" placeholder="0" onchange="setOptDaily('${c.id}',this.value)"></span></td>
+      <td>${(function(){const ld=liveDia(c.code,optDia);
+        if(!ld)return '<span style="color:var(--txt-faint)">—</span>';
+        const n=Number(ld.conv)||0;
+        return `<b style="font-size:15px">${n}</b> <span class="empty-hint" style="margin:0">${n===1?'conversa':'conversas'}</span><div class="empty-hint" style="margin:0;font-size:11px">${fmtBRL(ld.inv)} investido</div>`;})()}</td>
       <td><input class="t" style="width:140px" type="date" value="${c.optDate||''}" onchange="setOptDate('${c.id}',this.value)"></td>
       <td>${prox}</td>
       ${wcells}
@@ -1551,10 +1556,19 @@ function renderOptInner(){
       <div class="metric ${vencidas?'alert':''}"><div class="mv">${vencidas}</div><div class="ml">🔴 Otimizações vencidas</div></div>
       <div class="metric"><div class="mv">${proximas}</div><div class="ml">🟡 Próximas (1-2 dias)</div></div>
     </div>
+    <div class="cfg-row" style="gap:8px;align-items:center;margin:-4px 0 12px;flex-wrap:wrap">
+      <span class="cfg-dem-lbl" style="margin:0">💬 Conversas do dia:</span>
+      <input class="t" type="date" style="width:160px" value="${optDia}" ${liveWeek()?`min="${liveWeek().from}"`:''} max="${iso(new Date())}" onchange="setOptDia(this.value)">
+      <button class="btn ${optDia===iso(new Date())?'primary':'ghost'}" onclick="setOptDia('${iso(new Date())}')">Hoje</button>
+      <span class="empty-hint" style="margin:0">${optDia===iso(new Date())?'mostrando hoje':'mostrando '+optDia.split('-').reverse().join('/')} · o robô guarda dia a dia desde domingo</span>
+      <div class="spacer"></div>
+      <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
+      <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar no Meta agora (leva ~3 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
+    </div>
     <div class="empty-hint" style="margin:-4px 0 12px">As 4 semanas mostram a <b>tendência</b> (🟢 Excelente · 🔵 Bom · 🟡 Observação · 🔴 Ruim) — calculada sozinha pelos resultados. A próxima otimização é 7 dias após a última.</div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>💰 Saldo</th><th>Valor diário</th><th>Última otim.</th><th>Próxima otim.</th>${weeks.map(w=>`<th class="opt-wk">${w.label}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
+        <thead><tr><th>Cliente</th><th>💰 Saldo</th><th>💬 Conversas</th><th>Última otim.</th><th>Próxima otim.</th>${weeks.map(w=>`<th class="opt-wk">${w.label}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
         <tbody>${rows||`<tr><td colspan="${8+weeks.length}" class="empty-hint">Nenhum cliente.</td></tr>`}</tbody>
       </table>
     </div>`;
@@ -2550,6 +2564,11 @@ function liveWeek(){const s=liveCache&&liveCache.semana;return (s&&s.from&&s.to)
 function liveDoCliente(code){
   if(!liveCache||!Array.isArray(liveCache.contas)||!code)return null;
   return liveCache.contas.find(c=>String(c.code)===String(code))||null;
+}
+function liveDia(code,d){ // investido/conversas de UM dia (o robô guarda dia a dia da semana)
+  const c=liveDoCliente(code);
+  if(!c||!Array.isArray(c.dias)||!d)return null;
+  return c.dias.find(x=>x.d===d)||null;
 }
 function liveQuando(){return (liveCache&&liveCache.updatedAt)?new Date(liveCache.updatedAt):null;}
 function liveIdadeMin(){const q=liveQuando();return q?Math.max(0,Math.round((Date.now()-q.getTime())/60000)):null;}

@@ -2528,6 +2528,7 @@ const RESULT_STATUS=[
 const resultMeta=id=>RESULT_STATUS.find(s=>s.id===id)||RESULT_STATUS[3];
 let painelCache=null, painelLoaded=false, painelLoading=false;
 let painelPeriod='total', painelFrom='', painelTo=''; // filtro: total | mes | semana | custom
+let painelCfgAberto=false; // os ajustes de faixa ficam escondidos (cabeçalho limpo)
 async function loadPainel(){
   if(painelLoading)return; painelLoading=true;
   try{const r=await window.storage.get('floow-painel',true);painelCache=(r&&r.value)?JSON.parse(r.value):{clientes:[]};}
@@ -2701,8 +2702,7 @@ function resultCfg(){return {
   pedBom:(state.painelPedBom!=null?Number(state.painelPedBom):4),            // a partir de 4 pedidos = 🔵 Bom
   pedExc:(state.painelPedExc!=null?Number(state.painelPedExc):7),            // acima de 7 pedidos = 🟢 Excelente
   custoBom:(state.painelCustoBom!=null?Number(state.painelCustoBom):1.0),    // conversa abaixo disso = boa
-  custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5), // conversa acima disso = cara
-  margem:(state.painelMargem!=null?Number(state.painelMargem):20)            // lucro = faturamento × margem% (só a coluna Lucro)
+  custoCaro:(state.painelCustoCaro!=null?Number(state.painelCustoCaro):1.5)  // conversa acima disso = cara
 };}
 /* Situação pela QUANTIDADE DE PEDIDOS: 0 → 🔴 ruim · 1 a 3 → 🟡 observação · 4 a 7 → 🔵 bom · 8+ → 🟢 excelente */
 function situacaoPorPedidos(n,cfg){
@@ -2774,7 +2774,6 @@ function setPainelCfg(){
   state.painelPedExc=Number($('#pPedExc').value)||7;
   state.painelCustoBom=Number($('#pCustoBom').value)||1;
   state.painelCustoCaro=Number($('#pCustoCaro').value)||1.5;
-  state.painelMargem=Number($('#pMargem').value)||20;
   saveData();renderResultadosInner();
 }
 function refreshPainel(){painelLoaded=false;liveLoaded=false;saldosLoaded=false;loadPainel();loadLive();loadSaldos();renderResultadosInner();toast('🔄 Buscando os números mais recentes…');}
@@ -2802,11 +2801,9 @@ function renderResultadosInner(){
     const custoV=(m&&Number(m.conversas)>0)?(Number(m.investido)||0)/Number(m.conversas):null;
     const cn=custoNivel(custoV,cfg);
     const cc=custoV!=null?`<span style="color:${cn.color};font-weight:600" title="${cn.label}">${fmtBRL(custoV)}</span>`:'—';
-    const lucroV=m?((Number(m.faturamento)||0)*(cfg.margem/100)):null;
-    const lucro=lucroV!=null?`<span style="color:#36d399;font-weight:600">${fmtBRL(lucroV)}</span>`:'—';
     return `<tr>
       <td class="res-cli">${r.c.code?`<span class="ccode">#${esc(r.c.code)}</span> `:''}${esc(r.c.name)}</td>
-      <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${lucro}</td><td>${roas}</td>
+      <td>${conv}</td><td>${cc}</td><td>${vend}</td><td>${taxa}</td><td>${fat}</td><td>${inv}</td><td>${roas}</td>
       <td>${situSel(r.c)}
         <div style="margin-top:4px"><span class="hbadge" style="--h:${sm.color}">${sm.em} ${sm.label}</span>${r.manual?' <span class="res-man" title="Definido por você (manual)">✏️</span>':''}</div></td>
       <td>
@@ -2827,15 +2824,22 @@ function renderResultadosInner(){
         </div>
         ${painelPeriod==='custom'?`<span style="display:flex;align-items:center;gap:6px">de <input class="t" type="date" id="pFrom" value="${painelFrom}" onchange="setPainelCustom()"> até <input class="t" type="date" id="pTo" value="${painelTo}" onchange="setPainelCustom()"></span>`:''}
         <span class="empty-hint" style="margin:0">${painelPeriodLabel()}</span>
+        <div class="spacer"></div>
+        <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
+        <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar os números no Meta neste instante (leva ~3 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
       </div>
-      <div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end">
+      <div class="hleg">${chips}</div>
+      <div class="empty-hint" style="margin-top:8px">
+        🔴 não vendeu · 🟡 abaixo de ${cfg.pedBom} · 🔵 ${cfg.pedBom} a ${cfg.pedExc} · 🟢 acima de ${cfg.pedExc} — pedidos da semana (${semanaLabel()})
+        <a href="#" onclick="event.preventDefault();painelCfgAberto=!painelCfgAberto;renderResultadosInner()" style="color:var(--brand);margin-left:8px">${painelCfgAberto?'fechar ajustes':'⚙️ ajustar'}</a>
+      </div>
+      ${painelCfgAberto?`<div class="cfg-row" style="flex-wrap:wrap;gap:16px;align-items:flex-end;margin-top:10px">
         <div>
-          <div class="cfg-dem-lbl">🎯 Situação — pedidos na semana (${semanaLabel()})</div>
+          <div class="cfg-dem-lbl">🎯 Situação (pedidos na semana)</div>
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            🔵 Bom a partir de <input class="t" id="pPedBom" type="number" min="1" step="1" style="width:62px" value="${cfg.pedBom}" onchange="setPainelCfg()"> pedidos
+            🔵 Bom a partir de <input class="t" id="pPedBom" type="number" min="1" step="1" style="width:62px" value="${cfg.pedBom}" onchange="setPainelCfg()">
             · 🟢 Excelente acima de <input class="t" id="pPedExc" type="number" min="1" step="1" style="width:62px" value="${cfg.pedExc}" onchange="setPainelCfg()">
           </span>
-          <div class="empty-hint" style="margin:4px 0 0">🔴 não vendeu · 🟡 1 a ${Math.max(cfg.pedBom-1,1)} · 🔵 ${cfg.pedBom} a ${cfg.pedExc} · 🟢 ${cfg.pedExc+1} ou mais.<br>Na tabela: a coluna <b>Situação</b> é você que escolhe (em "Automático" ela segue os pedidos) e em <b>✏️ Pedidos</b> você digita quantos pedidos o cliente teve nesta semana — o que você digitar vence o número do robô. O filtro de período acima <b>não</b> muda a situação.</div>
         </div>
         <div>
           <div class="cfg-dem-lbl">💬 Custo por conversa (R$)</div>
@@ -2844,26 +2848,16 @@ function renderResultadosInner(){
             · 🔴 acima de <input class="t" id="pCustoCaro" type="number" min="0" step="0.1" style="width:74px" value="${cfg.custoCaro}" onchange="setPainelCfg()">
           </span>
         </div>
-        <div>
-          <div class="cfg-dem-lbl">💰 Margem de lucro</div>
-          <span style="display:flex;align-items:center;gap:6px"><input class="t" id="pMargem" type="number" min="0" max="100" step="1" style="width:70px" value="${cfg.margem}" onchange="setPainelCfg()"><b>% do faturamento</b></span>
-        </div>
-        <div class="spacer"></div>
-        <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
-        <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar os números no Meta neste instante (leva ~1 a 2 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
-      </div>
-      <div class="hleg" style="margin-top:10px">${chips}</div>
-      ${when?`<div class="empty-hint" style="margin-top:6px">Vendas e faturamento (planilhas) · atualizado em ${pad(when.getDate())}/${pad(when.getMonth()+1)} às ${pad(when.getHours())}:${pad(when.getMinutes())}</div>`:`<div class="empty-hint" style="margin-top:6px">⚠️ Ainda não recebi dados do robô. Rode <b>gerarPainelGeral</b> no Apps Script (e cole a anon key lá).</div>`}
-      ${(function(){const q=liveQuando(),min=liveIdadeMin();
-        if(!q)return '<div class="empty-hint" style="margin:2px 0 0">⚡ Investido e conversas ao vivo: aguardando o robô. Rode <b>atualizarAgora</b> no Apps Script.</div>';
-        const quando=min<2?'agora há pouco':(min<60?`há ${min} min`:`às ${pad(q.getHours())}:${pad(q.getMinutes())}`);
-        const sb=saldosBaixos().length;
-        return `<div class="empty-hint" style="margin:2px 0 0">⚡ Investido, conversas e 💰 saldo direto do Meta · ${quando}${min>90?' <b style="color:var(--danger)">(o robô parece parado)</b>':''}${sb?` · <b style="color:var(--danger)">🔴 ${sb} conta(s) com saldo baixo</b>`:''}</div>`;})()}
+      </div>`:''}
+      ${(function(){const q=liveQuando(),min=liveIdadeMin(),sb=saldosBaixos().length;
+        const meta=q?`⚡ Meta ${min<2?'agora':(min<60?'há '+min+' min':'às '+pad(q.getHours())+':'+pad(q.getMinutes()))}${min>90?' <b style="color:var(--danger)">(parado)</b>':''}`:'⚡ Meta: aguardando o robô';
+        const plan=when?` · 📋 planilhas ${pad(when.getDate())}/${pad(when.getMonth()+1)} ${pad(when.getHours())}:${pad(when.getMinutes())}`:'';
+        return `<div class="empty-hint" style="margin-top:8px">${meta}${plan}${sb?` · <b style="color:var(--danger)">🔴 ${sb} com saldo baixo</b>`:''}</div>`;})()}
     </div>
     <div class="panel" style="overflow-x:auto">
       <table class="res-table">
-        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>Lucro</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">você escolhe</span></th><th>✏️ Pedidos<br><span style="font-weight:400;text-transform:none;opacity:.7">da semana</span></th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
-        <tbody>${body||'<tr><td colspan="13" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
+        <thead><tr><th>Cliente</th><th>Conversas</th><th>Custo/conv</th><th>Vendas</th><th>Conversão</th><th>Faturamento</th><th>Investido</th><th>ROAS</th><th>Situação<br><span style="font-weight:400;text-transform:none;opacity:.7">você escolhe</span></th><th>✏️ Pedidos<br><span style="font-weight:400;text-transform:none;opacity:.7">da semana</span></th><th>📋 Relatório</th><th>Obs.</th></tr></thead>
+        <tbody>${body||'<tr><td colspan="12" class="empty-hint">Nenhum cliente.</td></tr>'}</tbody>
       </table>
     </div>`;
 }

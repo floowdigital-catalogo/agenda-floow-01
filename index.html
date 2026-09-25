@@ -917,6 +917,8 @@ let hoursView='week'; // 'day' | 'week' | 'month' no relatório de Horas
 let editingId=null, draftType='outro', draftResp=null, draftDone=false, draftPrio='';
 /* 👥 quem participa da reunião de equipe: null = TODOS os integrantes; array de ids = só os escolhidos */
 let draftEquipe=null;
+/* responsáveis marcados: só as reuniões de equipe usam (array); nas outras fica null e vale o draftResp */
+let draftResps=null;
 const PRIO={red:{label:'Urgente',color:'#f2675c'},yellow:{label:'Importante',color:'#f5b400'},green:{label:'Tranquilo',color:'#36d399'}};
 function pickPrio(p){draftPrio=(draftPrio===p)?'':p;renderPrio();}
 function renderPrio(){document.querySelectorAll('#fPrio .prio-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===draftPrio));}
@@ -941,6 +943,15 @@ function userById(id){return (state.users||[]).find(u=>u.id===id);}
 function respColor(id){const u=userById(id);return u&&u.color?u.color:'#6f6c64';}
 function respName(id){const u=userById(id);return u?u.name:'—';}
 function respForDemand(typeId){return (state.users||[]).filter(u=>u.demands&&u.demands.includes(typeId));}
+/* Responsáveis de uma demanda. Normalmente é um só (`ev.resp`); nas reuniões de EQUIPE
+   dá pra marcar dois ou mais e aí vale `ev.resps` (o primeiro continua em `ev.resp`,
+   pra tudo que já existia no app seguir funcionando). */
+function evResps(ev){
+  if(ev&&Array.isArray(ev.resps)&&ev.resps.length)return ev.resps.slice();
+  return (ev&&ev.resp)?[ev.resp]:[];
+}
+function evTemResp(ev,uid){return !!uid&&evResps(ev).indexOf(uid)>=0;}
+function respNames(ev){const l=evResps(ev).map(respName).filter(Boolean);return l.length?l.join(' · '):'—';}
 function adminUsers(){return (state.users||[]).filter(u=>u.isAdmin);}
 function typeOf(id){return TYPES_().find(t=>t.id===id)||{id,em:'📌',label:'—',link:null};}
 function typeWantsLoc(typeId){const t=typeOf(typeId);return !!(t&&(t.id==='captacao'||/capta/i.test(t.label||'')));}
@@ -1155,9 +1166,9 @@ function clientArchived(id){const c=id?clientById(id):null;return !!(c&&c.status
 function codeArchived(code){if(!code)return false;const c=state.clients.find(x=>String(x.code)===String(code));return !!(c&&c.status==='arquivado');}
 function visibleEvents(){
   let evs=state.events.filter(e=>!clientArchived(e.clientId)); // esconde demandas de clientes arquivados
-  if(!canManage()){return evs.filter(e=>e.resp===myMember());}
+  if(!canManage()){return evs.filter(e=>evTemResp(e,myMember()));}
   if(fClient)evs=evs.filter(e=>e.clientId===fClient);
-  if(fResp)evs=evs.filter(e=>e.resp===fResp);
+  if(fResp)evs=evs.filter(e=>evTemResp(e,fResp));
   return evs;
 }
 function eventsOn(d){return visibleEvents().filter(e=>e.date===iso(d)).sort((a,b)=>(a.time||'99').localeCompare(b.time||'99'));}
@@ -1297,8 +1308,8 @@ function renderDash(app){
   const segs=RESULT_STATUS.map(h=>situ[h.id]?`<span style="width:${(situ[h.id]/Math.max(total,1)*100)}%;background:${h.color}" title="${h.label}: ${situ[h.id]}"></span>`:'').join('');
   const leg=RESULT_STATUS.map(h=>situ[h.id]?`<span class="it"><span class="dot" style="background:${h.color}"></span>${h.label} <b>${situ[h.id]}</b></span>`:'').join('');
   const funcs=state.users;
-  const maxLoad=Math.max(1,...funcs.map(m=>evs.filter(e=>e.resp===m.id&&!e.done).length));
-  const loadRows=funcs.map(m=>{const n=evs.filter(e=>e.resp===m.id&&!e.done).length;const ov=evs.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;
+  const maxLoad=Math.max(1,...funcs.map(m=>evs.filter(e=>evTemResp(e,m.id)&&!e.done).length));
+  const loadRows=funcs.map(m=>{const n=evs.filter(e=>evTemResp(e,m.id)&&!e.done).length;const ov=evs.filter(e=>evTemResp(e,m.id)&&!e.done&&e.date<today).length;
     return `<div class="loadrow"><span class="ln">${esc(respName(m.id))}</span><div class="lbar"><span style="width:${n/maxLoad*100}%;background:${m.color}"></span></div><span class="ln-n">${n}${ov?` <b class="bad">(${ov}!)</b>`:''}</span></div>`;}).join('');
   const attn=cs.map(c=>({c,s:clientSituacao(c)})).filter(x=>['ruim','observacao'].includes(x.s)).sort((a,b)=>(a.s==='ruim'?0:1)-(b.s==='ruim'?0:1));
   const attnHtml=attn.length?attn.map(x=>{const c=x.c;const h=resultMeta(x.s);return `<div class="attn-item" style="--h:${h.color}" onclick="setTab('resultados')"><span class="hbadge" style="--h:${h.color}">${h.em} ${h.label}</span><b>${c.code?'#'+esc(c.code)+' ':''}${esc(c.name)}</b><span class="attn-pend">${clientPending(c.id)} pend.</span></div>`;}).join(''):'<div class="tp-empty">Nenhum cliente em alerta 🎉</div>';
@@ -1732,7 +1743,7 @@ function renderHours(app){
   else if(hoursView==='month'){const s=new Date(c.getFullYear(),c.getMonth(),1),e=new Date(c.getFullYear(),c.getMonth()+1,0);startIso=iso(s);endIso=iso(e);period=`${MONTHS[c.getMonth()]} ${c.getFullYear()}`;scope='no mês';}
   else{const s=startOfWeek(c),e=new Date(s);e.setDate(s.getDate()+6);startIso=iso(s);endIso=iso(e);period=`${s.getDate()} ${MONTHS_S[s.getMonth()]} – ${e.getDate()} ${MONTHS_S[e.getMonth()]}`;scope='na semana';}
   const done=state.events.filter(e=>e.done&&e.date>=startIso&&e.date<=endIso);
-  const rows=state.users.map(u=>{const evs=done.filter(e=>e.resp===u.id);return {u,mins:evs.reduce((s,e)=>s+eventDuration(e),0),count:evs.length};}).filter(r=>r.count>0).sort((a,b)=>b.mins-a.mins);
+  const rows=state.users.map(u=>{const evs=done.filter(e=>evTemResp(e,u.id));return {u,mins:evs.reduce((s,e)=>s+eventDuration(e),0),count:evs.length};}).filter(r=>r.count>0).sort((a,b)=>b.mins-a.mins);
   const totalMins=rows.reduce((s,r)=>s+r.mins,0);
   const maxMins=Math.max(1,...rows.map(r=>r.mins));
   const list=rows.length?rows.map(r=>`
@@ -1765,10 +1776,10 @@ function renderTasks(app){
     return `<div class="tk${over?' over':''}" onclick="openEv('${e.id}')"><span class="tk-d">${over?'⚠ ':''}${dd}${fmtRange(e)?' · '+fmtRange(e):''}</span><span class="tk-t">${prioDot(e)}${typeOf(e.type).em} ${esc(e.title)}<span class="tk-c"> · ${esc(clientName(e.clientId))}</span></span></div>`;};
   const members=canManage()?state.users:state.users.filter(m=>m.id===myMember());
   const evAtivos=state.events.filter(e=>!clientArchived(e.clientId)); // ignora demandas de clientes arquivados
-  let totalOver=0;members.forEach(m=>{totalOver+=evAtivos.filter(e=>e.resp===m.id&&!e.done&&e.date<today).length;});
+  let totalOver=0;members.forEach(m=>{totalOver+=evAtivos.filter(e=>evTemResp(e,m.id)&&!e.done&&e.date<today).length;});
   const head=`<div class="list-head">${canManage()?'Tarefas por usuário':'Suas tarefas'} · <b class="${totalOver?'bad':''}">${totalOver} atrasada${totalOver===1?'':'s'}</b></div>`;
   const panels=members.map(m=>{
-    const mine=evAtivos.filter(e=>e.resp===m.id);
+    const mine=evAtivos.filter(e=>evTemResp(e,m.id));
     const overdue=mine.filter(e=>!e.done&&e.date<today).sort(byDate);
     const todo=mine.filter(e=>!e.done&&e.date>=today).sort(byDate);
     const doneCount=mine.filter(e=>e.done).length;
@@ -2131,7 +2142,7 @@ function renderDay(app){
     blk.className='dblk'+(x.done?' done':'');
     blk.style.cssText=`--c:${c};top:${top}px;height:${height}px;left:${left};width:${w}`;
     blk.onclick=ev=>{ev.stopPropagation();openEv(x.id);};
-    blk.innerHTML=`<div class="db-t">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}${x.loc?' · 📍'+esc(x.loc):''}${x.obs?' · 📝'+esc(x.obs):''}</div><div class="db-r">${esc(respName(x.resp))}</div>`;
+    blk.innerHTML=`<div class="db-t">${prioDot(x)}${typeOf(x.type).em} ${esc(x.title)}</div><div class="db-s">${fmtRange(x)} · ${esc(clientName(x.clientId))}${x.loc?' · 📍'+esc(x.loc):''}${x.obs?' · 📝'+esc(x.obs):''}</div><div class="db-r">${esc(respNames(x))}</div>`;
     grid.appendChild(blk);
   });
   if(today){
@@ -2199,7 +2210,7 @@ function renderList(app){
       items.map(x=>{const c=respColor(x.resp);return `<div class="litem${x.done?' done':''}" style="--c:${c}" onclick="openEv('${x.id}')">
         <span class="li-time">${fmtRange(x)||'—'}</span>
         <span class="li-title">${typeOf(x.type).em} ${esc(x.title)}<span class="li-client"> · ${esc(clientName(x.clientId))}</span></span>
-        <span class="tag">${esc(respName(x.resp))}</span>${x.done?'<span class="li-check">✓</span>':''}</div>`;}).join('');
+        <span class="tag">${esc(respNames(x))}</span>${x.done?'<span class="li-check">✓</span>':''}</div>`;}).join('');
     wrap.appendChild(block);
   });
   app.appendChild(wrap);
@@ -2350,7 +2361,7 @@ function renderTimeline(){
     return `<div class="tl${ev.done?' done':''}" style="--c:${c}" onclick="closeClient();openEv('${ev.id}')">
       <div class="tl-d"><div class="tl-day">${d.getDate()}</div><div class="tl-mo">${MONTHS_S[d.getMonth()]}</div></div>
       <div class="tl-body"><div class="tl-t">${prioDot(ev)}${typeOf(ev.type).em} ${esc(ev.title)} ${ev.done?'✓':''}</div>
-      <div class="tl-sub">${respName(ev.resp)}${fmtRange(ev)?' · '+fmtRange(ev):''}${ev.loc?' · '+esc(ev.loc):''}</div></div></div>`;}).join('');
+      <div class="tl-sub">${respNames(ev)}${fmtRange(ev)?' · '+fmtRange(ev):''}${ev.loc?' · '+esc(ev.loc):''}</div></div></div>`;}).join('');
 }
 function addTaskForClient(){const c=clientById(openClientId);closeClient();openEv(null,null,c?c.name:'');}
 function saveClient(){
@@ -2424,6 +2435,7 @@ function openEv(id,presetDate,presetClient){
   draftDone=ev?!!ev.done:false;
   draftPrio=ev?(ev.priority||''):'';
   draftEquipe=(ev&&Array.isArray(ev.equipe))?ev.equipe.slice():null; // null = todos os integrantes
+  draftResps=(ev&&Array.isArray(ev.resps)&&ev.resps.length)?ev.resps.slice():null;
   renderTypeBtns();renderRespBtns();renderDoneToggle();renderPrio();updateDurHint();updateLocField();
   ['fClient','fDate','fTime','fEnd','fLoc','fMeet','fObs'].forEach(idf=>$('#'+idf).disabled=ro);
   $('#fPrio').style.pointerEvents=ro?'none':'';$('#fPrio').style.opacity=ro?'.6':'';
@@ -2436,11 +2448,33 @@ function openEv(id,presetDate,presetClient){
   $('#evScrim').classList.add('on');
 }
 function closeEv(){$('#evScrim').classList.remove('on');editingId=null;}
-function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;renderTypeBtns();renderRespBtns();updateLocField();
+function pickDemand(id){draftType=id;const dl=respForDemand(id);if(dl.length)draftResp=dl[0].id;draftResps=null;renderTypeBtns();renderRespBtns();updateLocField();
   const st=$('#fTime').value;if(st){const m=toMin(st)+typeDur(id);$('#fEnd').value=`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;updateDurHint();}}
 function renderTypeBtns(){$('#fTypes').innerHTML=TYPES_().map(t=>`<button class="typebtn${t.id===draftType?' on':''}" onclick="pickDemand('${t.id}')"><span class="em">${t.em}</span>${t.label}</button>`).join('');}
+function toggleResp(id){
+  if(!Array.isArray(draftResps))return;
+  const i=draftResps.indexOf(id);
+  if(i>=0){if(draftResps.length===1)return;draftResps.splice(i,1);} // sempre sobra pelo menos um
+  else draftResps.push(id);
+  renderRespBtns();
+}
 function renderRespBtns(){
   const assigned=respForDemand(draftType);
+  /* SÓ o alinhamento interno (demanda de equipe) aceita DOIS OU MAIS responsáveis.
+     A lista segue o ⚙️ Config → 👤 Usuários e responsabilidades: quem está vinculado à
+     demanda; se ninguém estiver, aparece a equipe toda. Nas outras demandas continua
+     um responsável só, como sempre foi. */
+  if(typeIsEquipe(draftType)){
+    const list=assigned.length?assigned:state.users;
+    if(!Array.isArray(draftResps))draftResps=draftResp?[draftResp]:[];
+    draftResps=draftResps.filter(id=>list.find(m=>m.id===id));
+    if(!draftResps.length&&list[0])draftResps=[list[0].id];
+    draftResp=draftResps[0];
+    $('#fResps').innerHTML=list.map(m=>`<button class="respbtn${draftResps.indexOf(m.id)>=0?' on':''}" style="--c:${m.color||'#888'}" onclick="toggleResp('${m.id}')"><span class="dot"></span>${esc(m.name)}</button>`).join('')
+      +`<span class="resp-note">${draftResps.length>1?draftResps.length+' responsáveis — clique pra marcar ou desmarcar':'Pode marcar dois ou mais responsáveis'}</span>`;
+    return;
+  }
+  draftResps=null;
   let list=assigned.length?assigned:state.users;
   if(!list.find(m=>m.id===draftResp))draftResp=list[0]&&list[0].id;
   const locked=assigned.length===1;
@@ -2459,9 +2493,11 @@ function updateDurHint(){
 $('#fEnd')&&document.addEventListener('input',e=>{if(e.target.id==='fEnd')updateDurHint();});
 function saveEv(){
   if(!canManage()){ // função só altera o "concluído" da própria demanda
-    if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&e.resp===myMember()){e.done=draftDone;touch(e);applyDeliveryLink(e);}}
+    if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&evTemResp(e,myMember())){e.done=draftDone;touch(e);applyDeliveryLink(e);}}
     saveData();closeEv();render();toast(draftDone?'Concluído — entrega marcada':'Status atualizado');return;
   }
+  // 👥 dois ou mais responsáveis: só no alinhamento interno, e só quando há mais de um marcado
+  const resps=(typeIsEquipe(draftType)&&Array.isArray(draftResps)&&draftResps.length>1)?draftResps.slice():null;
   // 👥 reunião de equipe com integrantes escolhidos: tem que sobrar pelo menos um com e-mail
   let equipe=null;
   if(typeIsEquipe(draftType)&&Array.isArray(draftEquipe)){
@@ -2470,7 +2506,7 @@ function saveEv(){
   }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
   const title=typeOf(draftType).label;
-  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',meetLink:typeIsOnline(draftType)?($('#fMeet').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim(),equipe:equipe};
+  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',meetLink:typeIsOnline(draftType)?($('#fMeet').value||'').trim():'',resp:resps?resps[0]:draftResp,resps:resps,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim(),equipe:equipe};
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}
@@ -3170,14 +3206,14 @@ function gcalHost(ev){
 function gcalPayload(ev,withMeet){
   const body={
     summary:`${typeOf(ev.type).em} ${ev.title} · ${clientName(ev.clientId)}`,
-    description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`,
+    description:`FLOOW Gestão\nResponsável: ${respNames(ev)}`,
     colorId:'3' // roxo ("Uva") no Google Agenda
   };
   if(typeIsEquipe(ev.type)){ // 👥 entra na agenda de cada convidado (a equipe toda, ou só os escolhidos)
     const conv=equipeEmails(ev);
     if(conv.length)body.attendees=conv.map(e=>({email:e}));
     const quem=Array.isArray(ev.equipe)?`${conv.length} integrante(s)`:'equipe toda';
-    body.description=`FLOOW Gestão · reunião da equipe (${quem})\nResponsável: ${respName(ev.resp)}`;
+    body.description=`FLOOW Gestão · reunião da equipe (${quem})\nResponsáveis: ${respNames(ev)}`;
   }
   if(withMeet)body.conferenceData={createRequest:{requestId:'floow-'+ev.id,conferenceSolutionKey:{type:'hangoutsMeet'}}};
   if(ev.time){
@@ -3206,7 +3242,7 @@ function syncEventToGoogle(ev){
     const base='https://www.googleapis.com/calendar/v3/calendars/'+encodeURIComponent(cal)+'/events';
     const q=[];
     if(withMeet)q.push('conferenceDataVersion=1');
-    if(equipe)q.push('sendUpdates=all'); // dispara o convite pra equipe toda
+    if(equipe)q.push('sendUpdates=all'); // dispara o convite pra equipe
     const url=base+(isUpdate?'/'+encodeURIComponent(ev.gcalId):'')+(q.length?'?'+q.join('&'):'');
     fetch(url,{method:isUpdate?'PATCH':'POST',headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:JSON.stringify(gcalPayload(ev,withMeet))})
       .then(r=>r.json()).then(data=>{
@@ -3215,7 +3251,7 @@ function syncEventToGoogle(ev){
         if(data&&data.hangoutLink&&!ev.meetLink)ev.meetLink=data.hangoutLink;
         if(data&&data.id)saveData();
         toast(equipe?('👥 Na agenda da equipe ('+equipeEmails(ev).length+' pessoas)'+(ev.meetLink?' · Meet 🔗':''))
-                    :('📅 Na agenda de '+respName(ev.resp)+(ev.meetLink?' · Meet 🔗':'')));
+                    :('📅 Na agenda de '+respNames(ev)+(ev.meetLink?' · Meet 🔗':'')));
       }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar na agenda');});
   });
 }
@@ -3461,7 +3497,7 @@ function checkUpcomingNotifications(){
   if(!state.events)return;
   const now=new Date();const todayIso=iso(now);const nowMin=now.getHours()*60+now.getMinutes();
   state.events.forEach(ev=>{
-    if(ev.done||ev.resp!==currentUser.id||ev.date!==todayIso)return;
+    if(ev.done||!evTemResp(ev,currentUser.id)||ev.date!==todayIso)return;
     const s=toMin(ev.time);if(s==null)return;
     const diff=s-nowMin;
     // 1) aviso de antecedência: de 20 min até 1 min antes

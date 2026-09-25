@@ -1524,7 +1524,9 @@ function markSold(cid,sold){const c=clientById(cid);if(!c)return;const cur=iso(s
 function setOptDate(cid,v){const c=clientById(cid);if(!c)return;c.optDate=v||'';touch(c);saveData();renderOptInner();}
 function setOptDaily(cid,v){const c=clientById(cid);if(!c)return;c.dailyValue=Number(v)||0;touch(c);saveData();}
 let optDia=iso(new Date()); // dia mostrado na coluna "💬 Conversas" das Otimizações
-function setOptDia(v){optDia=v||iso(new Date());renderOptInner();}
+let optSemana=false;        // ⚡ ligado = a coluna soma a SEMANA inteira em vez de um dia só
+function setOptDia(v){optSemana=false;optDia=v||iso(new Date());renderOptInner();}
+function setOptSemana(){optSemana=true;renderOptInner();}
 let optSearch='';
 function setOptSearch(v){optSearch=v;renderOptInner();focoBusca('#optSearch');}
 let optSort=null, optDir=-1;
@@ -1591,7 +1593,7 @@ function renderOptInner(){
   const optCfg=resultCfg(); // faixas de custo por conversa (as mesmas da aba Resultados)
   const csShow=cs.filter(c=>matchCliente(c,optSearch)); // 🔍 busca (as métricas de cima seguem com todos)
   if(optSort){ // ordenação pedida no cabeçalho (sem dado vai pro fim)
-    const val=c=>{const ld=liveDia(c.code,optDia),n=ld?(Number(ld.conv)||0):0;
+    const val=c=>{const ld=optSemana?liveSemana(c.code):liveDia(c.code,optDia),n=ld?(Number(ld.conv)||0):0;
       switch(optSort){
         case 'conv':return ld?n:-1;
         case 'custo':return (ld&&n>0)?(Number(ld.inv)||0)/n:-1;
@@ -1617,8 +1619,8 @@ function renderOptInner(){
     const url=clientComercialUrl(c);
     const link=url?`<a class="btn ghost opt-link" href="${esc(url)}" target="_blank" rel="noopener">Comercial ↗</a>`:'<span style="color:var(--txt-faint)">—</span>';
     const stSel=`<select class="filter" onchange="setOptStatus('${c.id}',this.value)">${[['ativo','🟢 Ativo'],['pausado','⏸ Pausado']].map(o=>`<option value="${o[0]}" ${c.status===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select>`;
-    // 💬 conversas e 💰 custo por conversa DO DIA escolhido (vêm do robô ao vivo)
-    const ld=liveDia(c.code,optDia);
+    // 💬 conversas e 💰 custo por conversa DO DIA escolhido — ou da SEMANA toda (vêm do robô ao vivo)
+    const ld=optSemana?liveSemana(c.code):liveDia(c.code,optDia);
     const nConv=ld?(Number(ld.conv)||0):null;
     const convCell=(ld==null)?'<span style="color:var(--txt-faint)">—</span>'
       :`<b style="font-size:15px">${nConv}</b> <span class="empty-hint" style="margin:0">${nConv===1?'conversa':'conversas'}</span><div class="empty-hint" style="margin:0;font-size:11px">${fmtBRL(ld.inv)} investido</div>`;
@@ -1651,10 +1653,11 @@ function renderOptInner(){
     <div class="cfg-row" style="gap:8px;align-items:center;margin:-4px 0 12px;flex-wrap:wrap">
       <input class="search" id="optSearch" style="max-width:260px" placeholder="🔍 Buscar cliente…" value="${esc(optSearch)}" oninput="setOptSearch(this.value)">
       ${optSearch?`<span class="empty-hint" style="margin:0">${csShow.length} de ${cs.length}</span>`:''}
-      <span class="cfg-dem-lbl" style="margin:0">💬 Conversas do dia:</span>
-      <input class="t" type="date" style="width:160px" value="${optDia}" ${liveWeek()?`min="${liveWeek().from}"`:''} max="${iso(new Date())}" onchange="setOptDia(this.value)">
-      <button class="btn ${optDia===iso(new Date())?'primary':'ghost'}" onclick="setOptDia('${iso(new Date())}')">Hoje</button>
-      <span class="empty-hint" style="margin:0">${optDia===iso(new Date())?'mostrando hoje':'mostrando '+optDia.split('-').reverse().join('/')} · custo/conv 🟢 até ${fmtBRL(optCfg.custoBom)} · 🟡 até ${fmtBRL(optCfg.custoCaro)} · 🔴 acima</span>
+      <span class="cfg-dem-lbl" style="margin:0">💬 Conversas ${optSemana?'da semana':'do dia'}:</span>
+      <input class="t" type="date" style="width:160px${optSemana?';opacity:.5':''}" value="${optDia}" ${liveWeek()?`min="${liveWeek().from}"`:''} max="${iso(new Date())}" onchange="setOptDia(this.value)">
+      <button class="btn ${(!optSemana&&optDia===iso(new Date()))?'primary':'ghost'}" onclick="setOptDia('${iso(new Date())}')">Hoje</button>
+      <button class="btn ${optSemana?'primary':'ghost'}" onclick="setOptSemana()" title="Soma a semana inteira (domingo até hoje) — os mesmos números que o robô já trouxe do Meta">Esta semana</button>
+      <span class="empty-hint" style="margin:0">${optSemana?'mostrando a semana · '+liveSemanaLabel():(optDia===iso(new Date())?'mostrando hoje':'mostrando '+optDia.split('-').reverse().join('/'))} · custo/conv 🟢 até ${fmtBRL(optCfg.custoBom)} · 🟡 até ${fmtBRL(optCfg.custoCaro)} · 🔴 acima</span>
       <div class="spacer"></div>
       <button class="btn ghost" onclick="refreshPainel()" ${roboRodando?'disabled':''}>🔄 Atualizar</button>
       <button class="btn primary" onclick="rodarRoboAgora()" ${roboRodando?'disabled':''} title="Manda o robô buscar no Meta agora (leva ~3 min)">${roboRodando?'⏳ Rodando o robô…':'🤖 Atualizar robô'}</button>
@@ -1664,7 +1667,7 @@ function renderOptInner(){
       <table class="res-table">
         <thead><tr><th>Cliente</th>${(function(){
           const th=(k,lbl)=>`<th class="th-sort${optSort===k?' on':''}" onclick="setOptSort('${k}')" title="Clique para ordenar (de novo inverte, na 3ª volta ao normal)">${lbl}${optSort===k?(optDir===-1?' ▼':' ▲'):''}</th>`;
-          return th('saldo','💰 Saldo')+th('conv','💬 Conversas')+th('custo','Custo/conv')+th('otim','Última otim.');
+          return th('saldo','💰 Saldo')+th('conv','💬 Conversas'+(optSemana?' · semana':''))+th('custo','Custo/conv')+th('otim','Última otim.');
         })()}<th>Próxima otim.</th>${weeks.map((w,wi)=>`<th class="opt-wk"${wi===weeks.length-1?' title="Semana atual — é esta que vale como situação do cliente no Painel e em Resultados" style="color:var(--brand)"':''}>${w.label}${wi===weeks.length-1?' ★':''}</th>`).join('')}<th>Status</th><th>Comercial</th><th>O que foi feito</th></tr></thead>
         <tbody>${rows||`<tr><td colspan="${9+weeks.length}" class="empty-hint">${optSearch?'Nenhum cliente encontrado para "'+esc(optSearch)+'".':'Nenhum cliente.'}</td></tr>`}</tbody>
       </table>
@@ -2676,6 +2679,21 @@ function liveDia(code,d){ // investido/conversas de UM dia (o robô guarda dia a
   const c=liveDoCliente(code);
   if(!c||!Array.isArray(c.dias)||!d)return null;
   return c.dias.find(x=>x.d===d)||null;
+}
+/* Semana inteira (domingo → hoje) do mesmo pacote do robô: é só somar os dias que ele já trouxe,
+   sem nova consulta ao Meta. O 'Esta semana' das Otimizações usa isto no lugar de um dia só. */
+function liveSemana(code){
+  const c=liveDoCliente(code);
+  if(!c)return null;
+  if(Array.isArray(c.dias)&&c.dias.length)
+    return c.dias.reduce((a,x)=>({inv:a.inv+(Number(x.inv)||0),conv:a.conv+(Number(x.conv)||0)}),{inv:0,conv:0});
+  if(c.inv!=null||c.conv!=null)return {inv:Number(c.inv)||0,conv:Number(c.conv)||0}; // totais que o robô já fecha
+  return null;
+}
+function liveSemanaLabel(){ // "21/09 a 25/09" — do domingo até o último dia que o robô buscou
+  const w=liveWeek();if(!w)return 'semana atual';
+  const dm=s=>String(s).split('-').reverse().slice(0,2).join('/');
+  return dm(w.from)+' a '+dm((liveCache&&liveCache.ate)||w.to);
 }
 function liveQuando(){return (liveCache&&liveCache.updatedAt)?new Date(liveCache.updatedAt):null;}
 function liveIdadeMin(){const q=liveQuando();return q?Math.max(0,Math.round((Date.now()-q.getTime())/60000)):null;}

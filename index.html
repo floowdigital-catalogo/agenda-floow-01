@@ -665,6 +665,14 @@
       <label class="f">🔗 Link do Meet <span style="text-transform:none;color:var(--txt-faint)">(automático se conectar o Google, ou cole aqui)</span></label>
       <input class="t" id="fMeet" placeholder="https://meet.google.com/…">
     </div>
+    <div id="fEquipeWrap" style="display:none">
+      <label class="f">👥 Quem participa</label>
+      <div class="prio-row" id="fEquipeModo">
+        <button type="button" class="prio-btn" data-m="todos" onclick="setEquipeModo('todos')">👥 Todos os integrantes</button>
+        <button type="button" class="prio-btn" data-m="alguns" onclick="setEquipeModo('alguns')">✅ Escolher integrantes</button>
+      </div>
+      <div class="respgrid" id="fEquipeMembros" style="margin-top:8px"></div>
+    </div>
     <label class="f">Responsável</label>
     <div class="respgrid" id="fResps"></div>
     <label class="f">Prioridade</label>
@@ -907,6 +915,8 @@ let cursor=new Date();
 let hoursWeek=new Date();
 let hoursView='week'; // 'day' | 'week' | 'month' no relatório de Horas
 let editingId=null, draftType='outro', draftResp=null, draftDone=false, draftPrio='';
+/* 👥 quem participa da reunião de equipe: null = TODOS os integrantes; array de ids = só os escolhidos */
+let draftEquipe=null;
 const PRIO={red:{label:'Urgente',color:'#f2675c'},yellow:{label:'Importante',color:'#f5b400'},green:{label:'Tranquilo',color:'#36d399'}};
 function pickPrio(p){draftPrio=(draftPrio===p)?'':p;renderPrio();}
 function renderPrio(){document.querySelectorAll('#fPrio .prio-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===draftPrio));}
@@ -939,11 +949,49 @@ function typeIsOnline(typeId){const t=typeOf(typeId);if(!t)return false;if(t.onl
 /* demanda da EQUIPE TODA: entra na agenda de todo mundo (alinhamento interno e afins) */
 function typeIsEquipe(typeId){const t=typeOf(typeId);if(!t)return false;if(t.equipe)return true;
   return /alinhamento interno|reuni[aã]o interna|reuni[aã]o de equipe/i.test(t.label||'');}
-/* e-mails de toda a equipe (pra convidar na agenda) */
-function equipeEmails(){return state.users.map(u=>(u.email||'').trim()).filter(e=>/@/.test(e));}
+/* e-mails de quem vai ser convidado na agenda.
+   Sem `ev.equipe` (ou com ele nulo) = a equipe toda, como sempre foi;
+   com a lista de ids = só os integrantes escolhidos naquela reunião. */
+function equipeEmails(ev){
+  let us=state.users;
+  if(ev&&Array.isArray(ev.equipe))us=us.filter(u=>ev.equipe.indexOf(u.id)>=0);
+  return us.map(u=>(u.email||'').trim()).filter(e=>/@/.test(e));
+}
+function temEmail(u){return /@/.test((u&&u.email||'').trim());}
 function updateLocField(){
   const w=$('#fLocWrap');if(w)w.style.display=typeWantsLoc(draftType)?'':'none';
   const m=$('#fMeetWrap');if(m)m.style.display=typeIsOnline(draftType)?'':'none';
+  renderEquipe();
+}
+/* 👥 bloco "Quem participa" — só aparece nas demandas de equipe (alinhamento interno e afins) */
+function setEquipeModo(m){
+  if(m==='todos')draftEquipe=null;
+  else if(!Array.isArray(draftEquipe))draftEquipe=state.users.filter(temEmail).map(u=>u.id); // começa com todo mundo marcado; é só desmarcar quem não vai
+  renderEquipe();
+}
+function toggleEquipeMembro(id){
+  if(!Array.isArray(draftEquipe))return;
+  const i=draftEquipe.indexOf(id);
+  if(i>=0)draftEquipe.splice(i,1);else draftEquipe.push(id);
+  renderEquipe();
+}
+function renderEquipe(){
+  const w=$('#fEquipeWrap');if(!w)return;
+  const mostrar=typeIsEquipe(draftType);
+  w.style.display=mostrar?'':'none';
+  if(!mostrar)return;
+  const alguns=Array.isArray(draftEquipe);
+  document.querySelectorAll('#fEquipeModo .prio-btn').forEach(b=>b.classList.toggle('on',(b.dataset.m==='alguns')===alguns));
+  const box=$('#fEquipeMembros');if(!box)return;
+  if(!alguns){
+    const n=equipeEmails().length;
+    box.innerHTML=`<span class="resp-note">Entra na agenda de todo mundo — ${n} ${n===1?'pessoa convidada':'pessoas convidadas'}.</span>`;
+    return;
+  }
+  box.innerHTML=state.users.map(u=>{
+    const sem=!temEmail(u), on=draftEquipe.indexOf(u.id)>=0;
+    return `<button type="button" class="respbtn${on?' on':''}" style="--c:${u.color||'#888'}" ${sem?'disabled title="Sem e-mail no Config — não dá pra convidar"':`onclick="toggleEquipeMembro('${u.id}')"`}><span class="dot"></span>${esc(u.name)}${sem?' ⚠':''}</button>`;
+  }).join('')+`<span class="resp-note">${draftEquipe.filter(id=>temEmail(userById(id))).length} convidado(s) — clique pra marcar ou desmarcar.</span>`;
 }
 function typeDur(typeId){const t=typeOf(typeId);return (t&&t.dur>0)?t.dur:60;} // tempo médio (min); padrão 60
 function eventDuration(ev){const s=toMin(ev.time),e=toMin(ev.end);if(s!=null&&e!=null&&e>s)return e-s;return typeDur(ev.type);} // real se houver início+fim; senão a média
@@ -2375,11 +2423,13 @@ function openEv(id,presetDate,presetClient){
   draftResp=ev?ev.resp:(dl[0]?dl[0].id:(state.users[0]&&state.users[0].id));
   draftDone=ev?!!ev.done:false;
   draftPrio=ev?(ev.priority||''):'';
+  draftEquipe=(ev&&Array.isArray(ev.equipe))?ev.equipe.slice():null; // null = todos os integrantes
   renderTypeBtns();renderRespBtns();renderDoneToggle();renderPrio();updateDurHint();updateLocField();
   ['fClient','fDate','fTime','fEnd','fLoc','fMeet','fObs'].forEach(idf=>$('#'+idf).disabled=ro);
   $('#fPrio').style.pointerEvents=ro?'none':'';$('#fPrio').style.opacity=ro?'.6':'';
   $('#fTypes').style.pointerEvents=ro?'none':'';$('#fTypes').style.opacity=ro?'.6':'';
   $('#fResps').style.pointerEvents=ro?'none':'';$('#fResps').style.opacity=ro?'.6':'';
+  $('#fEquipeWrap').style.pointerEvents=ro?'none':'';$('#fEquipeWrap').style.opacity=ro?'.6':'';
   $('#evDel').style.display=(id&&canManage())?'block':'none';
   $('#evCompromisso').style.display=id?'block':'none';
   $('#evSave').textContent=ro?'Salvar status':'Salvar';
@@ -2412,9 +2462,15 @@ function saveEv(){
     if(editingId){const e=state.events.find(x=>x.id===editingId);if(e&&e.resp===myMember()){e.done=draftDone;touch(e);applyDeliveryLink(e);}}
     saveData();closeEv();render();toast(draftDone?'Concluído — entrega marcada':'Status atualizado');return;
   }
+  // 👥 reunião de equipe com integrantes escolhidos: tem que sobrar pelo menos um com e-mail
+  let equipe=null;
+  if(typeIsEquipe(draftType)&&Array.isArray(draftEquipe)){
+    equipe=draftEquipe.filter(id=>temEmail(userById(id)));
+    if(!equipe.length){toast('Escolha pelo menos um integrante — ou use "👥 Todos os integrantes"');return;}
+  }
   const cid=findOrCreateClient($('#fClient').value)||(state.clients[0]&&state.clients[0].id);
   const title=typeOf(draftType).label;
-  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',meetLink:typeIsOnline(draftType)?($('#fMeet').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim()};
+  const data={clientId:cid,title,type:draftType,date:$('#fDate').value||iso(new Date()),time:$('#fTime').value,end:$('#fEnd').value,loc:typeWantsLoc(draftType)?($('#fLoc').value||'').trim():'',meetLink:typeIsOnline(draftType)?($('#fMeet').value||'').trim():'',resp:draftResp,done:draftDone,priority:draftPrio,obs:($('#fObs').value||'').trim(),equipe:equipe};
   let ref;
   if(editingId){ref=state.events.find(e=>e.id===editingId);Object.assign(ref,data);}
   else{ref={id:uid(),...data};state.events.push(ref);}
@@ -3117,10 +3173,11 @@ function gcalPayload(ev,withMeet){
     description:`FLOOW Gestão\nResponsável: ${respName(ev.resp)}`,
     colorId:'3' // roxo ("Uva") no Google Agenda
   };
-  if(typeIsEquipe(ev.type)){ // 👥 equipe toda: entra na agenda de cada pessoa como convidada
-    const conv=equipeEmails();
+  if(typeIsEquipe(ev.type)){ // 👥 entra na agenda de cada convidado (a equipe toda, ou só os escolhidos)
+    const conv=equipeEmails(ev);
     if(conv.length)body.attendees=conv.map(e=>({email:e}));
-    body.description=`FLOOW Gestão · reunião da equipe\nResponsável: ${respName(ev.resp)}`;
+    const quem=Array.isArray(ev.equipe)?`${conv.length} integrante(s)`:'equipe toda';
+    body.description=`FLOOW Gestão · reunião da equipe (${quem})\nResponsável: ${respName(ev.resp)}`;
   }
   if(withMeet)body.conferenceData={createRequest:{requestId:'floow-'+ev.id,conferenceSolutionKey:{type:'hangoutsMeet'}}};
   if(ev.time){
@@ -3157,7 +3214,7 @@ function syncEventToGoogle(ev){
         if(data&&data.id){ev.gcalId=data.id;ev.gcalCal=cal;}
         if(data&&data.hangoutLink&&!ev.meetLink)ev.meetLink=data.hangoutLink;
         if(data&&data.id)saveData();
-        toast(equipe?('👥 Na agenda da equipe ('+equipeEmails().length+' pessoas)'+(ev.meetLink?' · Meet 🔗':''))
+        toast(equipe?('👥 Na agenda da equipe ('+equipeEmails(ev).length+' pessoas)'+(ev.meetLink?' · Meet 🔗':''))
                     :('📅 Na agenda de '+respName(ev.resp)+(ev.meetLink?' · Meet 🔗':'')));
       }).catch(e=>{console.warn('gcal',e);toast('Falha ao sincronizar na agenda');});
   });
